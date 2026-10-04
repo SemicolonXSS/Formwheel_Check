@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FormWheel Checklist</title>
+
+<style>
+:root{
+  --bg:#f7f8fc;
+  --card:#fff;
+  --text:#20242b;
+  --muted:#737985;
+  --line:#e6e8ee;
+  --accent:#4f46e5;
+}
+
+*{
+  box-sizing:border-box;
+}
+
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+header{
+  position:sticky;
+  top:0;
+  z-index:10;
+  background:rgba(255,255,255,.94);
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);
+}
+
+.header-inner{
+  max-width:1100px;
+  margin:auto;
+  padding:16px 20px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+}
+
+.logo{
+  font-size:21px;
+  font-weight:800;
+  letter-spacing:-.5px;
+}
+
+.logo span{
+  color:var(--accent);
+}
+
+.home{
+  color:var(--muted);
+  text-decoration:none;
+  font-size:14px;
+}
+
+main{
+  max-width:1100px;
+  margin:0 auto;
+  padding:28px 20px 60px;
+}
+
+.hero{
+  margin-bottom:22px;
+}
+
+h1{
+  margin:0 0 8px;
+  font-size:30px;
+  letter-spacing:-1px;
+}
+
+.hero p{
+  margin:0;
+  color:var(--muted);
+}
+
+.progress-card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:18px;
+  margin:22px 0;
+  box-shadow:0 5px 18px rgba(20,25,40,.04);
+}
+
+.progress-top{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:center;
+  margin-bottom:12px;
+}
+
+.progress-number{
+  font-size:24px;
+  font-weight:800;
+}
+
+.progress-label{
+  font-size:13px;
+  color:var(--muted);
+}
+
+.bar{
+  height:10px;
+  background:#eceef4;
+  border-radius:999px;
+  overflow:hidden;
+}
+
+.bar-fill{
+  height:100%;
+  width:0;
+  background:var(--accent);
+  border-radius:999px;
+  transition:width .25s;
+}
+
+.actions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:14px;
+}
+
+button{
+  border:1px solid var(--line);
+  background:#fff;
+  color:var(--text);
+  border-radius:10px;
+  padding:9px 12px;
+  cursor:pointer;
+  font-weight:650;
+}
+
+button:hover{
+  background:#f7f7fb;
+}
+
+button.primary{
+  background:var(--accent);
+  color:#fff;
+  border-color:var(--accent);
+}
+
+.category{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  margin:12px 0;
+  overflow:hidden;
+}
+
+.category-head{
+  padding:15px 17px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+}
+
+.category-title{
+  font-weight:800;
+  flex:1;
+}
+
+.category-count{
+  font-size:12px;
+  color:var(--muted);
+  white-space:nowrap;
+}
+
+.items{
+  border-top:1px solid var(--line);
+}
+
+label.item{
+  display:flex;
+  align-items:flex-start;
+  gap:11px;
+  padding:11px 17px;
+  cursor:pointer;
+  border-bottom:1px solid #f0f1f5;
+}
+
+label.item:last-child{
+  border-bottom:0;
+}
+
+label.item:hover{
+  background:#fafaff;
+}
+
+input[type=checkbox]{
+  width:18px;
+  height:18px;
+  margin:1px 0 0;
+  accent-color:var(--accent);
+  cursor:pointer;
+  flex:none;
+}
+
+.item-text{
+  line-height:1.45;
+}
+
+.item.done .item-text{
+  text-decoration:line-through;
+  color:#9a9faa;
+}
+
+.chevron{
+  transition:transform .2s;
+  color:var(--muted);
+}
+
+.category.closed .chevron{
+  transform:rotate(-90deg);
+}
+
+.category.closed .items{
+  display:none;
+}
+
+.footer{
+  text-align:center;
+  color:var(--muted);
+  font-size:13px;
+  margin-top:30px;
+}
+
+#firebaseStatus{
+  position:fixed;
+  right:14px;
+  bottom:14px;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:9px 12px;
+  font-size:12px;
+  box-shadow:0 5px 18px rgba(20,25,40,.08);
+  z-index:99;
+}
+
+@media(max-width:600px){
+
+  h1{
+    font-size:25px;
+  }
+
+  main{
+    padding:22px 13px 45px;
+  }
+
+  .header-inner{
+    padding:14px;
+  }
+
+  .category-head{
+    padding:14px;
+  }
+
+  label.item{
+    padding:11px 14px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="header-inner">
+
+    <div class="logo">
+      Form<span>Wheel</span> Checklist
+    </div>
+
+    <a
+      class="home"
+      href="https://semicolonxss.github.io/Formwheel/"
+    >
+      Home
+    </a>
+
+  </div>
+</header>
+
+
+<main>
+
+  <section class="hero">
+
+    <h1>🎡 FormWheel 개선 체크리스트</h1>
+
+    <p>
+      FormWheel 프로젝트의 개선 작업을 체크하고 진행률을 관리하세요.
+    </p>
+
+  </section>
+
+
+  <section class="progress-card">
+
+    <div class="progress-top">
+
+      <div>
+
+        <div
+          class="progress-number"
+          id="percent"
+        >
+          0%
+        </div>
+
+        <div
+          class="progress-label"
+          id="count"
+        >
+          0 / 0 완료
+        </div>
+
+      </div>
+
+      <div
+        class="progress-label"
+        id="saveStatus"
+      >
+        Firebase 연결 중...
+      </div>
+
+    </div>
+
+
+    <div class="bar">
+
+      <div
+        class="bar-fill"
+        id="bar"
+      ></div>
+
+    </div>
+
+
+    <div class="actions">
+
+      <button
+        class="primary"
+        onclick="checkAll()"
+      >
+        전체 체크
+      </button>
+
+      <button
+        onclick="uncheckAll()"
+      >
+        전체 해제
+      </button>
+
+      <button
+        onclick="resetList()"
+      >
+        진행상태 초기화
+      </button>
+
+    </div>
+
+  </section>
+
+
+  <div id="checklist"></div>
+
+
+  <div class="footer">
+    체크 상태는 Firebase에 자동 저장됩니다.
+  </div>
+
+</main>
+
+
+<!-- Firebase -->
+
+<script type="module">
+
+import {
+  initializeApp
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+
+import {
+  getDatabase,
+  ref,
+  onValue,
+  set
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
+
+const firebaseConfig = {
+
+  apiKey:
+    "AIzaSyBreTSe1m0-xlbF4aupnU5isRZCihR25IE",
+
+  authDomain:
+    "formwheel.firebaseapp.com",
+
+  databaseURL:
+    "https://formwheel-default-rtdb.firebaseio.com",
+
+  projectId:
+    "formwheel",
+
+  storageBucket:
+    "formwheel.firebasestorage.app",
+
+  messagingSenderId:
+    "431583088241",
+
+  appId:
+    "1:431583088241:web:74e0e34ea1e3e1170c55d0",
+
+  measurementId:
+    "G-T372YXDF8D"
+
+};
+
+
+const app = initializeApp(firebaseConfig);
+
+const db = getDatabase(app);
+
+const checklistRef =
+  ref(db, "formwheelChecklist");
+
+
+window.firebaseChecklist = {
+  db,
+  checklistRef,
+  set
+};
+
+
+showFirebaseStatus("🔄 Firebase 연결 중...");
+
+
+onValue(
+  checklistRef,
+
+  snapshot => {
+
+    const remoteData =
+      snapshot.val();
+
+    if(
+      remoteData &&
+      typeof remoteData === "object"
+    ){
+
+      state = remoteData;
+
+    }else{
+
+      state = {};
+
+    }
+
+    firebaseReady = true;
+
+    showFirebaseStatus(
+      "☑️ Firebase 연결됨 · 자동 저장"
+    );
+
+    render();
+
+  },
+
+  error => {
+
+    console.error(
+      "Firebase 오류:",
+      error
+    );
+
+    firebaseReady = false;
+
+    showFirebaseStatus(
+      "❌ Firebase 연결 실패"
+    );
+
+  }
+
+);
+
+</script>
+
+
+<script>
+
+const data = {
+
+"🏠 FormWheel Hub":[
+
+"카드 크기 줄이기",
+"카드 여백 줄이기",
+"직사각형 카드 형태 통일",
+"게임/도구/앱 카테고리 정리",
+"게임 설명 추가",
+"1인 / 멀티 표시",
+"온라인 / 오프라인 표시",
+"난이도 표시",
+"최근 추가 기능",
+"검색 기능",
+"모바일 UI 확인",
+"모든 링크 최종 확인",
+"공통 Header 통일",
+"공통 Footer 추가"
+
+],
+
+
+"🎮 게임 공통 시스템":[
+
+"공통 버튼 디자인",
+"공통 카드 디자인",
+"공통 Modal",
+"공통 Toast",
+"공통 Loading 화면",
+"공통 Error 화면",
+"공통 게임 시작 화면",
+"공통 Countdown",
+"공통 결과 화면",
+"공통 재시작 버튼",
+"공통 방 코드 UI",
+"닉네임 제한 통일",
+"모바일 대응",
+"새로고침 복구",
+"나가기 처리",
+"연결 끊김 처리"
+
+],
+
+
+"🔥 Firebase":[
+
+"프로젝트별 DB 경로 통일",
+"기존 DB와 충돌 여부 확인",
+"사용자 데이터 구조 통일",
+"점수 데이터 구조 통일",
+"게임 방 데이터 구조 통일",
+"개발용 read/write true 제거",
+"Authentication 확인",
+"사용자별 접근 권한",
+"방별 접근 권한",
+"점수 조작 방지",
+"관리자/Producer 권한 서버 측 검증",
+"Chat 보안 규칙 작성",
+"Casino 보안 규칙 작성",
+"Battle 보안 규칙 작성",
+"Firebase 연결 성공 표시",
+"Firebase 연결 실패 표시",
+"API Key 오류 표시",
+"Auth 오류 표시",
+"Database Rules 오류 표시",
+"네트워크 끊김 표시"
+
+],
+
+
+"⚔️ FormWheel Battle":[
+
+"로비 상태 관리 개선",
+"waiting 상태",
+"countdown 상태",
+"playing 상태",
+"result 상태",
+"finished 상태",
+"새로고침 복구",
+"플레이어 퇴장 처리",
+"문제 동기화",
+"타이머 동기화",
+"점수 계산 검증",
+"결과 화면 개선",
+"퀴즈 목록 개선",
+"부정행위 방지"
+
+],
+
+
+"💣 FormWheel Bomb":[
+
+"게임 시작 버그 해결",
+"방 코드 가림 문제 해결",
+"타이머 증가 버그 해결",
+"10~30초 설정 확인",
+"폭탄 전달 애니메이션",
+"폭탄 상태 동기화",
+"탈락 처리",
+"최종 결과 화면",
+"재시작 기능",
+"모바일 화면 개선"
+
+],
+
+
+"🎲 FormWheel Dice Duel":[
+
+"라운드 시스템 안정화",
+"최대 5라운드",
+"속성 시스템 데이터화",
+"Fire",
+"Ice",
+"Electric",
+"Poison",
+"Wind",
+"Gold",
+"속성 상호작용 정리",
+"주사위 애니메이션",
+"전투 결과 애니메이션",
+"승패 처리",
+"최종 결과",
+"Firebase 동기화 테스트"
+
+],
+
+
+"🕵️ FormWheel Spy":[
+
+"장소 단어 100개 이상 추가",
+"장소 카테고리화",
+"난이도 추가",
+"질문 시스템",
+"질문 횟수 제한",
+"질문 기록",
+"타이머",
+"의심 투표",
+"스파이 추측",
+"결과 공개",
+"승리 조건 명확화",
+"모바일 UI"
+
+],
+
+
+"👑 FormWheel GCrown":[
+
+"5×5 보드",
+"6×6 보드",
+"7×7 보드",
+"30 Action",
+"Solo",
+"AI",
+"Battle",
+"2인",
+"3인",
+"4인",
+"AI Easy",
+"AI Normal",
+"AI Hard",
+"튜토리얼",
+"규칙 설명",
+"승리 조건 표시",
+"Firebase 안정화"
+
+],
+
+
+"🎵 FormWheel Music":[
+
+"음악 제작",
+"음표 입력",
+"쉼표",
+"Enter 입력",
+"3옥타브",
+"코드",
+"자동 다음 박자",
+"피아노",
+"바이올린",
+"드럼",
+"한손",
+"양손",
+"4손",
+"오선보",
+"MP3 업로드",
+"Synthesia 방식",
+"오선보 재생",
+"다른 사람 음악",
+"내 음악",
+"재생 종료 시 소리 정지",
+"Space 시작",
+"3",
+"2",
+"1",
+"게임 시작",
+"음량 개선",
+"점수",
+"콤보",
+"랭킹",
+"Audio Engine 분리",
+"Music Data 분리",
+"Editor 분리",
+"Player 분리",
+"Game 분리",
+"Firebase 분리"
+
+],
+
+
+"💬 FormWheel Chat":[
+
+"로그인",
+"전체 채팅",
+"6자리 방 코드",
+"대소문자 코드",
+"1:1 채팅",
+"그룹 채팅",
+"이모지",
+"왼쪽 방 목록",
+"방 목록 유지",
+"읽지 않은 메시지",
+"Producer",
+"메시지 삭제",
+"메시지 수정",
+"임시 차단",
+"@ 명령어",
+"Bot",
+"사용자 검색",
+"Firebase Rules",
+"권한 서버 검증"
+
+],
+
+
+"🎰 FormWheel Casino":[
+
+"로그인",
+"Google 로그인",
+"100 Coins Daily",
+"잔액",
+"거래 기록",
+"게임 보상",
+"소비 기록",
+"인벤토리",
+"배경",
+"이름 장식",
+"계정 데이터 이전 확인",
+"Firebase 보안",
+"코인 조작 방지"
+
+],
+
+
+"🖱️ FormWheel Clicker":[
+
+"클릭 시스템",
+"Power 업그레이드",
+"Auto 업그레이드",
+"저장",
+"불러오기",
+"최고 점수",
+"서버 랭킹",
+"업적",
+"미션",
+"Prestige",
+"랜덤 이벤트"
+
+],
+
+
+"⚡ FormWheel Reflex":[
+
+"Solo",
+"Battle",
+"랜덤 대기",
+"조기 클릭 판정",
+"반응속도 측정",
+"최고 기록",
+"라운드 시스템",
+"기록 저장",
+"결과 화면",
+"모바일 대응"
+
+],
+
+
+"🟢 FormWheel Marble":[
+
+"기본 맵 1",
+"기본 맵 2",
+"기본 맵 3",
+"커스텀 맵",
+"[기생충-3]",
+"[전랑]",
+"커스텀 문법 설명",
+"맵 미리보기",
+"맵 저장",
+"맵 공유",
+"오류 문법 처리"
+
+],
+
+
+"🧰 FormWheel Decode":[
+
+"Base64",
+"ROT13",
+"HTML Entity",
+"URL Encode",
+"Binary",
+"Decimal",
+"Hex",
+"Octal",
+"Encode / Decode 전환",
+"자동 인식",
+"결과 복사",
+"입력 초기화",
+"도구별 설명"
+
+],
+
+
+"🤖 FormWheel AI":[
+
+"기본 대화",
+"초기 상태",
+"메모리 저장",
+"메모리 검색",
+"반복 답변 개선",
+"학습 단계",
+"Level 시스템",
+"경험치",
+"행동 변화",
+"기억 목록",
+"잘못된 기억 수정",
+"발전 과정 표시",
+"보내기 버튼 버그 해결"
+
+],
+
+
+"🔄 자리바꾸기":[
+
+"기본 셔플",
+"셔플 전 자리 공개",
+"빈자리 지정",
+"오른쪽 클릭 지정",
+"남녀 조정",
+"남-파랑",
+"여-핑크",
+"남여여남",
+"사용자 지정 배치",
+"확률 검증",
+"랜덤성 검증",
+"결과 저장",
+"모바일 대응"
+
+],
+
+
+"🎹 FormWheel Piano":[
+
+"도~시",
+"# 음",
+"♭ 음",
+"도넛 보드",
+"플레이어별 말 4개",
+"음표 카드",
+"게임 규칙",
+"튜토리얼",
+"승리 조건",
+"멀티플레이"
+
+],
+
+
+"⏱️ FormWheel Time":[
+
+"10초 게임",
+"공격",
+"대결",
+"솔로",
+"점수",
+"콤보",
+"최고 기록",
+"랜덤 이벤트",
+"Battle",
+"결과 화면"
+
+],
+
+
+"🧱 코드 품질":[
+
+"중복 JavaScript 제거",
+"중복 CSS 제거",
+"변수 이름 정리",
+"함수 이름 정리",
+"전역 변수 최소화",
+"Firebase 코드 분리",
+"게임 상태 분리",
+"UI 함수 분리",
+"에러 처리",
+"주석 정리",
+"새로고침 테스트",
+"모바일 테스트",
+"여러 명 동시 접속 테스트"
+
+],
+
+
+"🚀 최종 출시":[
+
+"게임 실행됨",
+"핵심 기능 작동",
+"치명적인 버그 없음",
+"모바일",
+"Firebase",
+"여러 명 테스트",
+"새로고침 테스트",
+"오류 메시지",
+"보안 규칙",
+"Hub 등록",
+"게임 설명",
+"아이콘",
+"썸네일",
+"README",
+"GitHub 정리",
+"Firebase Rules",
+"개인정보 관련 안내",
+"최종 버그 테스트"
+
+]
+
+};
+
+
+let state = {};
+
+let firebaseReady = false;
+
+
+function showFirebaseStatus(message){
+
+  const el =
+    document.getElementById(
+      "firebaseStatus"
+    );
+
+  const save =
+    document.getElementById(
+      "saveStatus"
+    );
+
+  if(el){
+    el.textContent = message;
+  }
+
+  if(save){
+    save.textContent = message;
+  }
+
+}
+
+
+function save(){
+
+  updateProgress();
+
+  if(
+    firebaseReady &&
+    window.firebaseChecklist
+  ){
+
+    window.firebaseChecklist
+      .set(
+        window.firebaseChecklist.checklistRef,
+        state
+      )
+      .then(()=>{
+
+        showFirebaseStatus(
+          "☑️ 저장됨 · Firebase"
+        );
+
+      })
+      .catch(error=>{
+
+        console.error(
+          "Firebase 저장 실패:",
+          error
+        );
+
+        showFirebaseStatus(
+          "❌ Firebase 저장 실패"
+        );
+
+      });
+
+  }
+
+}
+
+
+function render(){
+
+  const root =
+    document.getElementById(
+      "checklist"
+    );
+
+  root.innerHTML = "";
+
+  let index = 0;
+
+
+  for(
+    const [category,items]
+    of Object.entries(data)
+  ){
+
+    const section =
+      document.createElement(
+        "section"
+      );
+
+    section.className =
+      "category";
+
+
+    const head =
+      document.createElement(
+        "div"
+      );
+
+    head.className =
+      "category-head";
+
+
+    head.innerHTML = `
+
+      <div class="category-title">
+        ${category}
+      </div>
+
+      <div
+        class="category-count"
+        id="cat-${index}"
+      >
+        0 / ${items.length}
+      </div>
+
+      <div class="chevron">
+        ⌄
+      </div>
+
+    `;
+
+
+    head.addEventListener(
+      "click",
+      event=>{
+
+        if(
+          event.target.closest(
+            "input"
+          )
+        ){
+          return;
+        }
+
+        section.classList.toggle(
+          "closed"
+        );
+
+      }
+    );
+
+
+    const list =
+      document.createElement(
+        "div"
+      );
+
+    list.className =
+      "items";
+
+
+    items.forEach(
+      (item,i)=>{
+
+        const id =
+          category +
+          "::" +
+          i;
+
+
+        const label =
+          document.createElement(
+            "label"
+          );
+
+        label.className =
+          "item";
+
+
+        const checkbox =
+          document.createElement(
+            "input"
+          );
+
+        checkbox.type =
+          "checkbox";
+
+
+        checkbox.checked =
+          !!state[id];
+
+
+        const span =
+          document.createElement(
+            "span"
+          );
+
+        span.className =
+          "item-text";
+
+
+        span.textContent =
+          item;
+
+
+        if(
+          checkbox.checked
+        ){
+
+          label.classList.add(
+            "done"
+          );
+
+        }
+
+
+        checkbox.addEventListener(
+          "change",
+          ()=>{
+
+            state[id] =
+              checkbox.checked;
+
+            label.classList.toggle(
+              "done",
+              checkbox.checked
+            );
+
+            save();
+
+            updateCategory(
+              category,
+              index,
+              items.length
+            );
+
+          }
+        );
+
+
+        label.append(
+          checkbox,
+          span
+        );
+
+
+        list.appendChild(
+          label
+        );
+
+      }
+    );
+
+
+    section.append(
+      head,
+      list
+    );
+
+
+    root.appendChild(
+      section
+    );
+
+
+    updateCategory(
+      category,
+      index,
+      items.length
+    );
+
+
+    index++;
+
+  }
+
+
+  updateProgress();
+
+}
+
+
+function updateCategory(
+  category,
+  index,
+  total
+){
+
+  let done = 0;
+
+
+  for(
+    let i=0;
+    i<total;
+    i++
+  ){
+
+    if(
+      state[
+        category +
+        "::" +
+        i
+      ]
+    ){
+
+      done++;
+
+    }
+
+  }
+
+
+  const el =
+    document.getElementById(
+      "cat-" + index
+    );
+
+
+  if(el){
+
+    el.textContent =
+      `${done} / ${total}`;
+
+  }
+
+}
+
+
+function allIds(){
+
+  const ids = [];
+
+
+  for(
+    const [category,items]
+    of Object.entries(data)
+  ){
+
+    items.forEach(
+      (_,i)=>{
+
+        ids.push(
+          category +
+          "::" +
+          i
+        );
+
+      }
+    );
+
+  }
+
+
+  return ids;
+
+}
+
+
+function updateProgress(){
+
+  const ids =
+    allIds();
+
+
+  const done =
+    ids.filter(
+      id=>state[id]
+    ).length;
+
+
+  const percent =
+    ids.length
+      ? Math.round(
+          done /
+          ids.length *
+          100
+        )
+      : 0;
+
+
+  document.getElementById(
+    "percent"
+  ).textContent =
+    percent + "%";
+
+
+  document.getElementById(
+    "count"
+  ).textContent =
+    `${done} / ${ids.length} 완료`;
+
+
+  document.getElementById(
+    "bar"
+  ).style.width =
+    percent + "%";
+
+}
+
+
+function checkAll(){
+
+  allIds().forEach(
+    id=>{
+      state[id] = true;
+    }
+  );
+
+  save();
+
+  render();
+
+}
+
+
+function uncheckAll(){
+
+  allIds().forEach(
+    id=>{
+      delete state[id];
+    }
+  );
+
+  save();
+
+  render();
+
+}
+
+
+function resetList(){
+
+  if(
+    confirm(
+      "모든 체크 상태를 초기화할까요?"
+    )
+  ){
+
+    state = {};
+
+    save();
+
+    render();
+
+  }
+
+}
+
+
+render();
+
+</script>
+
+</body>
+</html>

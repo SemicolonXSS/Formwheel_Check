@@ -286,9 +286,9 @@ input[type=checkbox]{
 <header>
   <div class="header-inner">
 
-    <div class="logo">
+    <a class="logo" href="https://semicolonxss.github.io/Formwheel/" style="color:inherit;text-decoration:none">
       Form<span>Wheel</span> Checklist
-    </div>
+    </a>
 
     <a
       class="home"
@@ -386,7 +386,7 @@ input[type=checkbox]{
 
 
   <div class="footer">
-    체크 상태는 Firebase에 자동 저장됩니다.
+    공유 체크리스트 · 체크 상태는 항목별로 Firebase에 저장됩니다.<br>2026-10-07 검증 완료 12개 항목을 체크했습니다. 저장 실패 시 변경은 기기에 보관됩니다.
   </div>
 
 </main>
@@ -404,7 +404,8 @@ import {
   getDatabase,
   ref,
   onValue,
-  set
+  update,
+  runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
 
 
@@ -448,11 +449,23 @@ const checklistRef =
 window.firebaseChecklist = {
   db,
   checklistRef,
-  set
+  update
 };
 
 
 showFirebaseStatus("🔄 Firebase 연결 중...");
+try {
+  await runTransaction(checklistRef, current => {
+    const next = current && typeof current === "object" ? {...current} : {};
+    if(next.__verified_20261007_fixes) return;
+    Object.assign(next, completedReviewItems);
+    next.__verified_20261007_fixes = true;
+    return next;
+  }, {applyLocally:false});
+} catch(error) {
+  console.warn("완료 항목 동기화 실패:", error);
+}
+
 
 
 onValue(
@@ -468,11 +481,11 @@ onValue(
       typeof remoteData === "object"
     ){
 
-      state = remoteData;
+      state = {...remoteData, ...pendingChanges};
 
     }else{
 
-      state = {};
+      state = {...pendingChanges};
 
     }
 
@@ -483,6 +496,7 @@ onValue(
     );
 
     render();
+    flushPending();
 
   },
 
@@ -1097,7 +1111,27 @@ for (const [category, items] of Object.entries(reviewAdditions)) {
   data[category].push(...items);
 }
 
-let state = {};
+data["🔎 코드 분석 · Formwheel_Check"].push("[P1] 공유 체크리스트를 항목별로 저장하고 오프라인 변경을 재전송하기 · 완료 기준: 서로 다른 항목의 동시 체크가 유지되고 실패한 변경은 재연결 후 다시 저장된다. 개인별 인증 경로 분리는 별도 작업이다.");
+const completedReviewItems = {
+  "🔎 코드 분석 · Formwheel::2": true,
+  "🔎 코드 분석 · Formwheel_Reflex::0": true,
+  "🔎 코드 분석 · Formwheel_Reflex::1": true,
+  "🔎 코드 분석 · Formwheel_Reflex::2": true,
+  "🔎 코드 분석 · Formwheel_Button::0": true,
+  "🔎 코드 분석 · Formwheel_Button::1": true,
+  "🔎 코드 분석 · Formwheel_Tool::0": true,
+  "🔎 코드 분석 · Formwheel_Music::0": true,
+  "🔎 코드 분석 · Formwheel_Marble::2": true,
+  "🔎 코드 분석 · Formwheel_Check::0": true,
+  "🔎 코드 분석 · Formwheel_Check::2": true,
+  "🔎 코드 분석 · Formwheel_Check::4": true
+};
+const pendingKey = "formwheel_check_pending_v1";
+let pendingChanges = {};
+try { pendingChanges = JSON.parse(localStorage.getItem(pendingKey) || "{}") || {}; } catch {}
+let state = {...completedReviewItems, ...pendingChanges};
+function cachePending(){try{localStorage.setItem(pendingKey, JSON.stringify(pendingChanges));}catch{}}
+
 
 let firebaseReady = false;
 
@@ -1125,44 +1159,32 @@ function showFirebaseStatus(message){
 }
 
 
-function save(){
-
-  updateProgress();
-
-  if(
-    firebaseReady &&
-    window.firebaseChecklist
-  ){
-
-    window.firebaseChecklist
-      .set(
-        window.firebaseChecklist.checklistRef,
-        state
-      )
-      .then(()=>{
-
-        showFirebaseStatus(
-          "☑️ 저장됨 · Firebase"
-        );
-
-      })
-      .catch(error=>{
-
-        console.error(
-          "Firebase 저장 실패:",
-          error
-        );
-
-        showFirebaseStatus(
-          "❌ Firebase 저장 실패"
-        );
-
-      });
-
-  }
-
+let saving = false;
+function save(changes = {}){
+ Object.assign(pendingChanges, changes);
+ cachePending();updateProgress();
+ if(!firebaseReady) showFirebaseStatus("기기에 보관 중 · 연결 후 저장");
+ flushPending();
 }
-
+async function flushPending(){
+ if(saving || !firebaseReady || !window.firebaseChecklist || !Object.keys(pendingChanges).length)return;
+ saving=true;
+ const patch={...pendingChanges};
+ let succeeded=false;
+ try{
+  await window.firebaseChecklist.update(window.firebaseChecklist.checklistRef, patch);
+  for(const [id,value] of Object.entries(patch))if(pendingChanges[id]===value)delete pendingChanges[id];
+  cachePending();succeeded=true;
+  showFirebaseStatus("☑️ 저장됨 · Firebase · 공유 목록");
+ }catch(error){
+  console.error("Firebase 저장 실패:",error);
+  showFirebaseStatus("❌ 저장 실패 · 기기에 보관 중 · 다음 변경 또는 재연결 시 재시도");
+ }finally{
+  saving=false;
+  if(succeeded && Object.keys(pendingChanges).length)flushPending();
+ }
+}
+window.addEventListener("online",flushPending);
 
 function render(){
 
@@ -1317,7 +1339,7 @@ function render(){
               checkbox.checked
             );
 
-            save();
+            save({[id]: checkbox.checked});
 
             updateCategory(
               category,
@@ -1489,52 +1511,14 @@ function updateProgress(){
 }
 
 
-function checkAll(){
-
-  allIds().forEach(
-    id=>{
-      state[id] = true;
-    }
-  );
-
-  save();
-
-  render();
-
+function applyAll(value){
+ const patch={};allIds().forEach(id=>{state[id]=value;patch[id]=value});
+ save(patch);render();
 }
-
-
-function uncheckAll(){
-
-  allIds().forEach(
-    id=>{
-      delete state[id];
-    }
-  );
-
-  save();
-
-  render();
-
-}
-
-
+function checkAll(){applyAll(true)}
+function uncheckAll(){applyAll(false)}
 function resetList(){
-
-  if(
-    confirm(
-      "모든 체크 상태를 초기화할까요?"
-    )
-  ){
-
-    state = {};
-
-    save();
-
-    render();
-
-  }
-
+ if(confirm("모든 체크 상태를 초기화할까요?"))applyAll(false);
 }
 
 
@@ -1544,3 +1528,4 @@ render();
 
 </body>
 </html>
+

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FormWheel Checklist</title>
 
-<link rel="stylesheet" href="./assets/styles.css?v=66c55b44c81a">
+<link rel="stylesheet" href="./assets/styles.css?v=stage5-20261008">
 <meta property="og:title" content="Check · Formwheel">
 <meta property="og:description" content="FormWheel 프로젝트의 개선 작업을 체크하고 진행률을 관리하는 도구.">
 <meta property="og:image" content="https://semicolonxss.github.io/Formwheel_Check/assets/thumbnail.svg">
@@ -40,7 +40,7 @@
     <h1>🎡 FormWheel 개선 체크리스트</h1>
 
     <p>
-      FormWheel 프로젝트의 개선 작업을 체크하고 진행률을 관리하세요.
+      FormWheel 작업을 5단계로 관리하세요. 항목의 단계 버튼을 누를 때마다 한 단계씩 올라갑니다.
       <br><small>2026-10-08 · 30개 저장소 개선 · 신규 개선 52개 항목 반영. 서버 적용·실기기 검증이 남은 항목은 별도로 표시했습니다.</small>
     </p>
 
@@ -90,26 +90,8 @@
 
 
     <div class="actions">
-
-      <button
-        class="primary"
-        onclick="checkAll()"
-      >
-        전체 체크
-      </button>
-
-      <button
-        onclick="uncheckAll()"
-      >
-        전체 해제
-      </button>
-
-      <button
-        onclick="resetList()"
-      >
-        진행상태 초기화
-      </button>
-
+      <span class="progress-label">미시작 → 구현 중 → 구현 완료 → 테스트 중 → 검증 완료 → 미시작</span>
+      <button onclick="resetList()">모든 단계 초기화</button>
     </div>
 
   </section>
@@ -124,7 +106,7 @@
 
 
   <div class="footer">
-    공유 체크리스트 · 체크 상태는 항목별로 Firebase에 저장됩니다.<br>2026-10-08 코드 검토 144개 + 신규 개선 52개 항목 반영 · 체크를 해제해도 검토 근거는 보존됩니다. 저장 실패 시 변경을 기기에 보관하고 재시도합니다.
+    공유 체크리스트 · 5단계 진행 상태는 항목별로 Firebase에 저장됩니다.<br>2026-10-08 코드 검토 144개 + 신규 개선 52개 항목 반영 · 기존 체크 데이터와 검토 근거를 보존하며 단계값은 별도로 저장됩니다. 저장 실패 시 변경을 기기에 보관하고 재시도합니다.
   </div>
 
 </main>
@@ -135,7 +117,7 @@
 <script type="module" src="./assets/app.js?v=719313ab5846"></script>
 
 
-<script src="./assets/app-2.js?v=cef3846d9e6a"></script>
+<script src="./assets/app-2.js?v=stage5-20261008"></script>
 
 </body>
 </html>

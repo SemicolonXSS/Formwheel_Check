@@ -1,0 +1,31 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const html=require('./load-source.cjs')();
+const scripts=[...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)].map(m=>({module:m[1].includes('module'),code:m[2]}));
+for(const s of scripts)new vm.Script(s.code.replace(/import\s*\{[\s\S]*?\}\s*from\s*"[^"]+";/g,''));
+const nodes=new Map(),storage=new Map(),timers=[];
+class Element{constructor(tag){this.tagName=tag;this.children=[];this.dataset={};this.style={};this.listeners={};this.checked=false;this.classList={add(){},toggle(){}};}append(...xs){this.children.push(...xs)}appendChild(x){this.append(x)}addEventListener(k,f){this.listeners[k]=f}set innerHTML(x){this.children=[];this._html=x}get innerHTML(){return this._html||''}querySelectorAll(selector){let out=[];for(const c of this.children){if(!c||!c.children)continue;if(selector==='label.item'&&c.tagName==='label')out.push(c);out.push(...c.querySelectorAll(selector));}return out;}}
+const document={createElement:t=>new Element(t),createTextNode:t=>({textContent:t}),getElementById:id=>{if(!nodes.has(id))nodes.set(id,new Element('div'));return nodes.get(id)},querySelectorAll:selector=>selector==='.category'?nodes.get('checklist').children:[]};
+document.getElementById('reviewFilter').value='all';
+const callbacks={},writes=[];let database={existing:true},writeMode='success',resolveWrite;
+const context=vm.createContext({document,console,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},window:{addEventListener(){}},setTimeout:(f,ms)=>{timers.push({f,ms});return timers.length},clearTimeout(){},confirm:()=>true,initializeApp:()=>({}),getDatabase:()=>({}),ref:(db,path)=>path,onValue:(r,ok,err)=>callbacks[r]={ok,err},update:async(r,patch)=>{writes.push({...patch});if(writeMode==='fail')throw Error('simulated write failure');if(writeMode==='hold')await new Promise(resolve=>resolveWrite=resolve);Object.assign(database,patch);},runTransaction:async(r,reducer)=>{let next=reducer(structuredClone(database));const committed=next!==undefined;if(committed)database=next;return{committed,snapshot:{val:()=>database}};}});
+const run=s=>vm.runInContext(s,context),tick=()=>new Promise(r=>setImmediate(r));
+run(scripts.find(s=>!s.module&&s.code.includes('const data')).code);
+run(scripts.find(s=>s.module).code.replace(/import\s*\{[\s\S]*?\}\s*from\s*"[^"]+";/g,''));
+const ids=run('allIds()'),complete=run('Object.keys(completedReviewItems)'),evidence=run('reviewEvidence');
+assert.equal(ids.length,377);for(const id of Object.keys(evidence))assert(ids.includes(id),'unknown ID '+id);
+assert.equal(new Set(ids).size,ids.length);
+assert.equal(document.getElementById('checklist').querySelectorAll('label.item').length,377);
+(async()=>{
+const a=complete[0],b=complete[1],implemented=run('Object.keys(implementedItems)'),unrelated=ids.find(id=>!complete.includes(id));
+assert.equal(run(`reconcileState({[reviewVersion]:true,[${JSON.stringify(a)}]:false})[${JSON.stringify(a)}]`),false,'new batch must preserve deliberate old uncheck');assert.equal(run(`reconcileState({[reviewVersion]:true})[${JSON.stringify(implemented[0])}]`),true);
+callbacks.formwheelChecklist.ok({val:()=>({[a]:false,[unrelated]:true})});assert.equal(run(`state[${JSON.stringify(a)}]`),true);assert.equal(run(`state[${JSON.stringify(unrelated)}]`),true);
+callbacks['.info/connected'].ok({val:()=>true});await tick();assert.equal(database.existing,true);assert.equal(database[a],true);assert.equal(database.__verified_20261008_reconciliation_v1,true);assert.equal(database.__implemented_20261008_features_v1,true);for(const id of implemented)assert.equal(database[id],true);
+callbacks.formwheelChecklist.ok({val:()=>({...database,[a]:false})});assert.equal(run(`state[${JSON.stringify(a)}]`),false,'explicit uncheck after migration must survive');
+run('firebaseReady=false');run(`state[${JSON.stringify(a)}]=false;save({[${JSON.stringify(a)}]:false})`);callbacks.formwheelChecklist.ok({val:()=>({...database,[a]:true})});assert.equal(run(`state[${JSON.stringify(a)}]`),false,'pending change must override stale snapshot');await tick();
+writeMode='hold';run(`state[${JSON.stringify(a)}]=true;save({[${JSON.stringify(a)}]:true})`);run(`state[${JSON.stringify(a)}]=false;save({[${JSON.stringify(a)}]:false,[${JSON.stringify(b)}]:true})`);writeMode='success';resolveWrite();await tick();await tick();assert.equal(database[a],false);assert.equal(database[b],true);assert.equal(run('Object.keys(pendingChanges).length'),0);
+writeMode='fail';run(`save({[${JSON.stringify(a)}]:true})`);await tick();assert.equal(run(`pendingChanges[${JSON.stringify(a)}]`),true);assert(timers.some(t=>t.ms===1000),'save must schedule retry');writeMode='success';await timers.find(t=>t.ms===1000).f();assert.equal(run('Object.keys(pendingChanges).length'),0);
+callbacks['.info/connected'].ok({val:()=>false});assert.equal(run('firebaseReady'),false);
+run('applyAll(false)');assert.equal(run('allIds().filter(id=>state[id]).length'),0);assert.equal(run('reconcileState({...state,[reviewVersion]:true})[allIds()[0]]'),false);
+run('pendingChanges={};state={...completedReviewItems};document.getElementById("reviewFilter").value="incomplete";render()');const labels=document.getElementById('checklist').querySelectorAll('label.item');assert.equal(labels.filter(l=>l.hidden).length,complete.length);
+console.log(JSON.stringify({syntax:'pass',stableIds:ids.length,verified:complete.length,newlyImplemented:implemented.length,evidence:Object.keys(evidence).length,checks:['offline initial render','migration preserves unrelated data','dated migration only once','manual uncheck/reset retained','pending overrides stale snapshots','concurrent toggles retained','automatic write retry','disconnect state','incomplete filter']}));
+})().catch(e=>{console.error(e);process.exitCode=1});

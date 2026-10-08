@@ -2822,12 +2822,33 @@ const pendingKey = "formwheel_check_pending_v1";
 let pendingChanges = {};
 try { pendingChanges = JSON.parse(localStorage.getItem(pendingKey) || "{}") || {}; } catch {}
 const stateKey="formwheel_check_state_v2";
+const STAGES=["미시작","구현 중","구현 완료","테스트 중","검증 완료"];
+function stageFor(id){
+ const pending=pendingChanges["__stages/"+id];
+ if(Number.isInteger(pending)&&pending>=0&&pending<=4)return pending;
+ const explicit=state.__stages?.[id];
+ if(Number.isInteger(explicit)&&explicit>=0&&explicit<=4)return explicit;
+ const evidence=reviewEvidence[id];
+ if(evidence?.status==="complete")return 2;
+ if(evidence?.status==="partial")return 1;
+ return state[id]===true?2:0;
+}
+function setStage(id,n){
+ const next=Math.max(0,Math.min(4,n));
+ state.__stages={...(state.__stages||{}),[id]:next};
+ save({["__stages/"+id]:next});
+ render();
+}
+
 let reviewSynced=false,firebaseConnected=false;
 function reconcileState(remote){
  const saved=remote && typeof remote==="object"?remote:{};
  // Apply this audit once; later deliberate unchecks remain authoritative.
  const next={...saved};for(const batch of reviewBatches)if(!saved[batch.version])Object.assign(next,batch.items);
- return {...next,...pendingChanges};
+ const merged={...next,...pendingChanges};
+ merged.__stages={...(next.__stages||{})};
+ for(const [k,v] of Object.entries(pendingChanges))if(k.startsWith("__stages/"))merged.__stages[k.slice(9)]=v;
+ return merged;
 }
 let cachedState={};
 try{cachedState=JSON.parse(localStorage.getItem(stateKey)||"{}")||{};}catch{}
@@ -3001,68 +3022,20 @@ function render(){
           "item";
 
 
-        const checkbox =
-          document.createElement(
-            "input"
-          );
-
-        checkbox.type =
-          "checkbox";
         label.dataset.itemId=id;
+        const stage=stageFor(id);
+        const control=document.createElement("button");
+        control.type="button";
+        control.className="stage-button stage-"+stage;
+        control.textContent=(stage+1)+"/5 · "+STAGES[stage];
+        control.title="클릭하면 다음 단계로 이동 (마지막 단계 다음은 미시작)";
+        control.setAttribute("aria-label",item+" : "+STAGES[stage]+". 다음 단계로 변경");
+        control.addEventListener("click",()=>setStage(id,(stageFor(id)+1)%5));
 
-
-        checkbox.checked =
-          !!state[id];
-
-
-        const span =
-          document.createElement(
-            "span"
-          );
-
-        span.className =
-          "item-text";
-
-
-        span.textContent =
-          item;
-
-
-        if(
-          checkbox.checked
-        ){
-
-          label.classList.add(
-            "done"
-          );
-
-        }
-
-
-        checkbox.addEventListener(
-          "change",
-          ()=>{
-
-            state[id] =
-              checkbox.checked;
-
-            label.classList.toggle(
-              "done",
-              checkbox.checked
-            );
-
-            save({[id]: checkbox.checked});
-            applyReviewFilter();
-
-            updateCategory(
-              category,
-              categoryIndex,
-              items.length
-            );
-
-          }
-        );
-
+        const span=document.createElement("span");
+        span.className="item-text";
+        span.textContent=item;
+        if(stage===4)label.classList.add("done");
 
         const copy=document.createElement("span");copy.className="item-copy";copy.append(span);
         const evidence=reviewEvidence[id];
@@ -3076,7 +3049,7 @@ function render(){
           link.title="검토한 파일 SHA: "+(evidence.sha||"현재 변경");
           note.append(link);copy.append(note);
         }
-        label.append(checkbox,copy);
+        label.append(control,copy);
 
 
         list.appendChild(
@@ -3121,7 +3094,7 @@ function applyReviewFilter(){
   let visible=0;
   for(const label of section.querySelectorAll("label.item")){
    const id=label.dataset.itemId;
-   label.hidden=mode==="incomplete"?!!state[id]:mode==="reviewed"?!reviewEvidence[id]:false;
+   label.hidden=mode==="incomplete"?stageFor(id)===4:mode==="reviewed"?!reviewEvidence[id]:false;
    if(!label.hidden)visible++;
   }
   section.hidden=!visible;
@@ -3143,13 +3116,7 @@ function updateCategory(
     i++
   ){
 
-    if(
-      state[
-        category +
-        "::" +
-        i
-      ]
-    ){
+    if(stageFor(category+"::"+i)===4){
 
       done++;
 
@@ -3205,55 +3172,19 @@ function allIds(){
 
 
 function updateProgress(){
-
-  const ids =
-    allIds();
-
-
-  const done =
-    ids.filter(
-      id=>state[id]
-    ).length;
-
-
-  const percent =
-    ids.length
-      ? Math.round(
-          done /
-          ids.length *
-          100
-        )
-      : 0;
-
-
-  document.getElementById(
-    "percent"
-  ).textContent =
-    percent + "%";
-
-
-  document.getElementById(
-    "count"
-  ).textContent =
-    `${done} / ${ids.length} 완료`;
-
-
-  document.getElementById(
-    "bar"
-  ).style.width =
-    percent + "%";
-
+ const ids=allIds();
+ const completed=ids.filter(id=>stageFor(id)===4).length;
+ const totalPoints=ids.reduce((sum,id)=>sum+stageFor(id),0);
+ const percent=ids.length?Math.round(totalPoints/(ids.length*4)*100):0;
+ document.getElementById("percent").textContent=percent+"%";
+ document.getElementById("count").textContent=completed+" / "+ids.length+" 검증 완료 · 전체 단계 진행률";
+ document.getElementById("bar").style.width=percent+"%";
 }
-
-
-function applyAll(value){
- const patch={};allIds().forEach(id=>{state[id]=value;patch[id]=value});
- save(patch);render();
-}
-function checkAll(){applyAll(true)}
-function uncheckAll(){applyAll(false)}
 function resetList(){
- if(confirm("모든 체크 상태를 초기화할까요?"))applyAll(false);
+ if(!confirm("모든 항목을 '미시작'으로 초기화할까요? 검토 근거는 보존됩니다."))return;
+ const patch={};state.__stages={...(state.__stages||{})};
+ for(const id of allIds()){state.__stages[id]=0;patch["__stages/"+id]=0;}
+ save(patch);render();
 }
 
 

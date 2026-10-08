@@ -275,3 +275,13 @@ input[type=checkbox]{
 .item-copy{flex:1;min-width:0}.review-note{display:block;margin-top:5px;color:var(--muted);font-size:12px;line-height:1.5;text-decoration:none}
 .review-note a{color:var(--accent)}.review-note.complete{color:#397344}
 label.item[hidden],.category[hidden]{display:none}
+
+/* Five-step review controls */
+.stage-button{flex:none;min-width:120px;text-align:center;padding:8px 10px;font-size:12px;border-radius:999px;transition:background .15s}
+.stage-0{background:#f0f1f4;color:#626a78}
+.stage-1{background:#fff2d8;color:#825300;border-color:#ead9aa}
+.stage-2{background:#e6efff;color:#264c9c;border-color:#c9d9fc}
+.stage-3{background:#eee8ff;color:#6542b0;border-color:#ded0ff}
+.stage-4{background:#e0f4e7;color:#17613a;border-color:#bde4cc}
+.item.done .item-text{text-decoration:none;color:#397344}
+@media(max-width:600px){label.item{gap:8px}.stage-button{min-width:105px;font-size:11px;padding:8px 6px}}

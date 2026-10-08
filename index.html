@@ -278,6 +278,11 @@ input[type=checkbox]{
     padding:11px 14px;
   }
 }
+.review-filter{display:flex;align-items:center;gap:10px;font-size:14px;margin:16px 0}
+.review-filter select{padding:9px;border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit}
+.item-copy{flex:1;min-width:0}.review-note{display:block;margin-top:5px;color:var(--muted);font-size:12px;line-height:1.5;text-decoration:none}
+.review-note a{color:var(--accent)}.review-note.complete{color:#397344}
+label.item[hidden],.category[hidden]{display:none}
 </style>
 </head>
 
@@ -309,6 +314,7 @@ input[type=checkbox]{
 
     <p>
       FormWheel 프로젝트의 개선 작업을 체크하고 진행률을 관리하세요.
+      <br><small>2026-10-08 · 30개 저장소 재검토. 확인된 구현은 완료로 반영하고, 서버 권한·실환경 테스트가 남은 항목은 별도로 표시했습니다.</small>
     </p>
 
   </section>
@@ -382,11 +388,16 @@ input[type=checkbox]{
   </section>
 
 
+  <label class="review-filter">표시
+    <select id="reviewFilter" onchange="applyReviewFilter()">
+      <option value="all">전체 항목</option><option value="incomplete">미완료 항목</option><option value="reviewed">검토 근거가 있는 항목</option>
+    </select>
+  </label>
   <div id="checklist"></div>
 
 
   <div class="footer">
-    공유 체크리스트 · 체크 상태는 항목별로 Firebase에 저장됩니다.<br>2026-10-07 검증 완료 12개 항목을 체크했습니다. 저장 실패 시 변경은 기기에 보관됩니다.
+    공유 체크리스트 · 체크 상태는 항목별로 Firebase에 저장됩니다.<br>2026-10-08 코드 검토 완료 144개 항목 반영 · 체크를 해제해도 검토 근거는 보존됩니다. 저장 실패 시 변경을 기기에 보관하고 재시도합니다.
   </div>
 
 </main>
@@ -453,69 +464,45 @@ window.firebaseChecklist = {
 };
 
 
-showFirebaseStatus("🔄 Firebase 연결 중...");
-try {
-  await runTransaction(checklistRef, current => {
-    const next = current && typeof current === "object" ? {...current} : {};
-    if(next.__verified_20261007_fixes) return;
-    Object.assign(next, completedReviewItems);
-    next.__verified_20261007_fixes = true;
-    return next;
-  }, {applyLocally:false});
-} catch(error) {
-  console.warn("완료 항목 동기화 실패:", error);
+// Start reads before an offline transaction can wait.
+let receivedSnapshot=false,migrationRunning=false,migrationRetry=null;
+function updateReady(){
+ firebaseReady=firebaseConnected && receivedSnapshot;
+ if(firebaseReady){syncReviewedItems();flushPending();}
 }
-
-
-
-onValue(
-  checklistRef,
-
-  snapshot => {
-
-    const remoteData =
-      snapshot.val();
-
-    if(
-      remoteData &&
-      typeof remoteData === "object"
-    ){
-
-      state = {...remoteData, ...pendingChanges};
-
-    }else{
-
-      state = {...pendingChanges};
-
-    }
-
-    firebaseReady = true;
-
-    showFirebaseStatus(
-      "☑️ Firebase 연결됨 · 자동 저장"
-    );
-
-    render();
-    flushPending();
-
-  },
-
-  error => {
-
-    console.error(
-      "Firebase 오류:",
-      error
-    );
-
-    firebaseReady = false;
-
-    showFirebaseStatus(
-      "❌ Firebase 연결 실패"
-    );
-
+async function syncReviewedItems(){
+ if(!firebaseReady || reviewSynced || migrationRunning)return;
+ migrationRunning=true;
+ try{
+  const result=await runTransaction(checklistRef,current=>{
+   const next=current && typeof current==="object"?{...current}:{};
+   if(next[reviewVersion])return;
+   Object.assign(next,completedReviewItems);next[reviewVersion]=true;return next;
+  },{applyLocally:false});
+  if(result.snapshot.val()?.[reviewVersion]){
+   reviewSynced=true;
+   if(!Object.keys(pendingChanges).length)showFirebaseStatus("☑️ 검토 결과 동기화됨 · 공유 목록");
   }
-
-);
+ }catch(error){
+  showFirebaseStatus("검토 결과 저장 실패 · 재연결 후 재시도");
+  clearTimeout(migrationRetry);migrationRetry=setTimeout(syncReviewedItems,15000);
+ }finally{migrationRunning=false;}
+}
+showFirebaseStatus("🔄 Firebase 연결 중...");
+onValue(checklistRef,snapshot=>{
+ const remoteData=snapshot.val();receivedSnapshot=true;
+ reviewSynced=!!remoteData?.[reviewVersion];state=reconcileState(remoteData);
+ cacheState();render();updateReady();
+ if(firebaseReady && !Object.keys(pendingChanges).length)
+  showFirebaseStatus(reviewSynced?"☑️ Firebase 연결됨 · 공유 목록":"🔄 검토 결과 동기화 중...");
+},error=>{
+ receivedSnapshot=false;firebaseReady=false;
+ showFirebaseStatus("❌ Firebase 읽기 실패 · 기기에 보관 중");
+});
+onValue(ref(db,".info/connected"),snapshot=>{
+ firebaseConnected=snapshot.val()===true;updateReady();
+ if(!firebaseConnected)showFirebaseStatus("기기에 보관 중 · Firebase 재연결 대기");
+});
 
 </script>
 
@@ -1112,24 +1099,1585 @@ for (const [category, items] of Object.entries(reviewAdditions)) {
 }
 
 data["🔎 코드 분석 · Formwheel_Check"].push("[P1] 공유 체크리스트를 항목별로 저장하고 오프라인 변경을 재전송하기 · 완료 기준: 서로 다른 항목의 동시 체크가 유지되고 실패한 변경은 재연결 후 다시 저장된다. 개인별 인증 경로 분리는 별도 작업이다.");
+const reviewVersion = "__verified_20261008_reconciliation_v1";
+const reviewEvidence = {
+  "🎵 FormWheel Music::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::6": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::7": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::13": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::14": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::15": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::16": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::17": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::19": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::20": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::21": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::22": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::23": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::24": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::25": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::26": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::27": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::28": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "음표·쉼표·화음 입력, C3~B5, 오선보/낙하 재생, 로컬 오디오 업로드, 카운트다운·점수·콤보·랭킹 코드 확인. MP3는 감상용이며 악보 자동 변환은 지원하지 않음."
+  },
+  "🎵 FormWheel Music::9": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "드럼과 손 모드는 선택값·표시에 존재하지만 전용 음색/손별 제한과 내 음악 전용 목록은 추가 확인이 필요함."
+  },
+  "🎵 FormWheel Music::10": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "드럼과 손 모드는 선택값·표시에 존재하지만 전용 음색/손별 제한과 내 음악 전용 목록은 추가 확인이 필요함."
+  },
+  "🎵 FormWheel Music::11": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "드럼과 손 모드는 선택값·표시에 존재하지만 전용 음색/손별 제한과 내 음악 전용 목록은 추가 확인이 필요함."
+  },
+  "🎵 FormWheel Music::12": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "드럼과 손 모드는 선택값·표시에 존재하지만 전용 음색/손별 제한과 내 음악 전용 목록은 추가 확인이 필요함."
+  },
+  "🎵 FormWheel Music::18": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "드럼과 손 모드는 선택값·표시에 존재하지만 전용 음색/손별 제한과 내 음악 전용 목록은 추가 확인이 필요함."
+  },
+  "🎵 FormWheel Music::29": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "섹션과 함수는 구분되어 있으나 별도 모듈/파일 분리는 아직 없음."
+  },
+  "🎵 FormWheel Music::30": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "섹션과 함수는 구분되어 있으나 별도 모듈/파일 분리는 아직 없음."
+  },
+  "🎵 FormWheel Music::31": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "섹션과 함수는 구분되어 있으나 별도 모듈/파일 분리는 아직 없음."
+  },
+  "🎵 FormWheel Music::32": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "섹션과 함수는 구분되어 있으나 별도 모듈/파일 분리는 아직 없음."
+  },
+  "🎵 FormWheel Music::33": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "섹션과 함수는 구분되어 있으나 별도 모듈/파일 분리는 아직 없음."
+  },
+  "🎵 FormWheel Music::34": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "섹션과 함수는 구분되어 있으나 별도 모듈/파일 분리는 아직 없음."
+  },
+  "💬 FormWheel Chat::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::6": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::7": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::9": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::10": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::11": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::12": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::13": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::14": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::15": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::16": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "Firebase Auth, 전체·개인·그룹 채팅, 6자리 코드, 이모지, 방 목록·읽음 상태, 메시지 편집/삭제, Producer·차단·명령어·봇·검색 구현 확인. 관리 기능의 서버 권한 검증은 별도 미완료."
+  },
+  "💬 FormWheel Chat::17": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "저장소에 Rules와 권한 거부 테스트가 없어서 서버 보안 완료로 판정하지 않음."
+  },
+  "💬 FormWheel Chat::18": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "저장소에 Rules와 권한 거부 테스트가 없어서 서버 보안 완료로 판정하지 않음."
+  },
+  "🎰 FormWheel Casino::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "계정 로그인, 100코인 일일 지급, 잔액·게임 보상 구현 확인. 평문 비밀번호/클라이언트 잔액 정산은 보안 개선이 필요함."
+  },
+  "🎰 FormWheel Casino::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "계정 로그인, 100코인 일일 지급, 잔액·게임 보상 구현 확인. 평문 비밀번호/클라이언트 잔액 정산은 보안 개선이 필요함."
+  },
+  "🎰 FormWheel Casino::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "계정 로그인, 100코인 일일 지급, 잔액·게임 보상 구현 확인. 평문 비밀번호/클라이언트 잔액 정산은 보안 개선이 필요함."
+  },
+  "🎰 FormWheel Casino::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "계정 로그인, 100코인 일일 지급, 잔액·게임 보상 구현 확인. 평문 비밀번호/클라이언트 잔액 정산은 보안 개선이 필요함."
+  },
+  "⚡ FormWheel Reflex::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::6": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::7": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::9": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "솔로 5회 측정, 랜덤 대기, 조기 입력 차단, 평균·최고 기록·로컬 저장, 키보드 입력 및 모바일 CSS 확인."
+  },
+  "⚡ FormWheel Reflex::1": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "현재 시작 화면과 코드에는 솔로만 있고 온라인 Battle 구현은 없음."
+  },
+  "🤖 FormWheel AI::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::6": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::7": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::9": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::10": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::11": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🤖 FormWheel AI::12": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "기억 저장·검색·수정·목록·내보내기, 중복 답변 회피, XP·단계·행동 변화와 전송 처리 구현 확인."
+  },
+  "🔄 자리바꾸기::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "Tool에서 Fisher–Yates 셔플, 시작/개별 공개, 빈자리·우클릭 지정과 입력 순서 배치를 구현. 남녀 패턴 기능은 없음."
+  },
+  "🔄 자리바꾸기::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "Tool에서 Fisher–Yates 셔플, 시작/개별 공개, 빈자리·우클릭 지정과 입력 순서 배치를 구현. 남녀 패턴 기능은 없음."
+  },
+  "🔄 자리바꾸기::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "Tool에서 Fisher–Yates 셔플, 시작/개별 공개, 빈자리·우클릭 지정과 입력 순서 배치를 구현. 남녀 패턴 기능은 없음."
+  },
+  "🔄 자리바꾸기::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "Tool에서 Fisher–Yates 셔플, 시작/개별 공개, 빈자리·우클릭 지정과 입력 순서 배치를 구현. 남녀 패턴 기능은 없음."
+  },
+  "🔄 자리바꾸기::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "Tool에서 Fisher–Yates 셔플, 시작/개별 공개, 빈자리·우클릭 지정과 입력 순서 배치를 구현. 남녀 패턴 기능은 없음."
+  },
+  "🎹 FormWheel Piano::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::6": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::9": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "자연음·반음, 원형 보드, 기본 말 4개, 카드·아이템, 규칙·통과 승리와 온라인 방 구현 확인."
+  },
+  "🎹 FormWheel Piano::7": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "규칙 설명은 있으나 단계별 플레이 튜토리얼은 확인되지 않음."
+  },
+  "⏱️ FormWheel Time::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "10초 솔로, 온라인 대결, 생존 기록 리더보드·결과 표시 구현. 공격/점수/콤보/별도 랜덤 이벤트는 확인되지 않음."
+  },
+  "⏱️ FormWheel Time::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "10초 솔로, 온라인 대결, 생존 기록 리더보드·결과 표시 구현. 공격/점수/콤보/별도 랜덤 이벤트는 확인되지 않음."
+  },
+  "⏱️ FormWheel Time::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "10초 솔로, 온라인 대결, 생존 기록 리더보드·결과 표시 구현. 공격/점수/콤보/별도 랜덤 이벤트는 확인되지 않음."
+  },
+  "⏱️ FormWheel Time::6": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "10초 솔로, 온라인 대결, 생존 기록 리더보드·결과 표시 구현. 공격/점수/콤보/별도 랜덤 이벤트는 확인되지 않음."
+  },
+  "⏱️ FormWheel Time::8": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "10초 솔로, 온라인 대결, 생존 기록 리더보드·결과 표시 구현. 공격/점수/콤보/별도 랜덤 이벤트는 확인되지 않음."
+  },
+  "⏱️ FormWheel Time::9": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "10초 솔로, 온라인 대결, 생존 기록 리더보드·결과 표시 구현. 공격/점수/콤보/별도 랜덤 이벤트는 확인되지 않음."
+  },
+  "🔎 코드 분석 · Formwheel::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "index.html",
+    "sha": "bd66c6ed6eddddc3726ec02af32cf7b16396aee8",
+    "note": "카드의 Reflex 솔로·Marble 한 화면·Vault 온라인 표시, addedAt 정렬과 14일 NEW, Button 실행 링크 및 모바일 터치 CSS 확인."
+  },
+  "🔎 코드 분석 · Formwheel::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "index.html",
+    "sha": "bd66c6ed6eddddc3726ec02af32cf7b16396aee8",
+    "note": "카드의 Reflex 솔로·Marble 한 화면·Vault 온라인 표시, addedAt 정렬과 14일 NEW, Button 실행 링크 및 모바일 터치 CSS 확인."
+  },
+  "🔎 코드 분석 · Formwheel::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "index.html",
+    "sha": "bd66c6ed6eddddc3726ec02af32cf7b16396aee8",
+    "note": "카드의 Reflex 솔로·Marble 한 화면·Vault 온라인 표시, addedAt 정렬과 14일 NEW, Button 실행 링크 및 모바일 터치 CSS 확인."
+  },
+  "🔎 코드 분석 · Formwheel::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "index.html",
+    "sha": "bd66c6ed6eddddc3726ec02af32cf7b16396aee8",
+    "note": "카드의 Reflex 솔로·Marble 한 화면·Vault 온라인 표시, addedAt 정렬과 14일 NEW, Button 실행 링크 및 모바일 터치 CSS 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Form::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Form",
+    "path": "index.html",
+    "sha": "5cf47f6481f70183dc92dc036bb9c3ce51e35698",
+    "note": "응답 키 범위에 limitToFirst(51)와 커서를 사용하여 응답별 순차 조회를 페이지 단위 조회로 교체."
+  },
+  "🔎 코드 분석 · Formwheel_Wheel::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Wheel",
+    "path": "index.html",
+    "sha": "26987f8cddbad571d0874687d51898436310ace4",
+    "note": "로그인/가입 문구에 현재 브라우저의 로컬 프로필이며 다른 기기 동기화·이메일 인증을 지원하지 않음을 명시."
+  },
+  "🔎 코드 분석 · Formwheel_Quiz::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Quiz",
+    "path": "index.html",
+    "sha": "b53174b12dbd9de85061bac43d9e40818b146109",
+    "note": "답안 유무 검사와 점수 반영을 동일 data 트랜잭션에서 수행하여 같은 답안 키 중복 적립 차단."
+  },
+  "🔎 코드 분석 · Formwheel_Battle::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Battle",
+    "path": "index.html",
+    "sha": "06640a75273152e91c1e4c20415ef145ad6511d5",
+    "note": "player.answers의 라운드 submitted 검사와 player.score 변경을 한 트랜잭션에서 수행."
+  },
+  "🔎 코드 분석 · Formwheel_Bomb::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Bomb",
+    "path": "index.html",
+    "sha": "4fd4b4b01f298fc00c06b08485abd577408b67ef",
+    "note": "onDisconnect presence, 호스트 교체·폭탄 보유자 교체·인원 부족 종료를 트랜잭션으로 처리."
+  },
+  "🔎 코드 분석 · Formwheel_DiceDuel::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_DiceDuel",
+    "path": "index.html",
+    "sha": "2707e68e7c8b001aea53a0f007c82076922693d5",
+    "note": "player2 자리 확보와 라운드 점수 확정에 트랜잭션·상태/라운드 검사를 도입."
+  },
+  "🔎 코드 분석 · Formwheel_DiceDuel::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_DiceDuel",
+    "path": "index.html",
+    "sha": "2707e68e7c8b001aea53a0f007c82076922693d5",
+    "note": "player2 자리 확보와 라운드 점수 확정에 트랜잭션·상태/라운드 검사를 도입."
+  },
+  "🔎 코드 분석 · Formwheel_Spy::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Spy",
+    "path": "index.html",
+    "sha": "508209ec359f0471b9fbebdac4cd1fd8c8b78359",
+    "note": "시작 후 신규 참가 제한, onDisconnect 참가자 제거, 호스트 교체 및 인원/스파이 이탈 시 명확한 결과 처리."
+  },
+  "🔎 코드 분석 · Formwheel_Music::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "activeTones의 oscillator.stop/disconnect, 업로드 오디오 정지, 재생·게임 종료 시 stopAllTones 호출 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Chat::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "메시지 캐시와 signature별 DOM 재사용, 51개 이전 기록 조회 및 스크롤 높이 보정 구현."
+  },
+  "🔎 코드 분석 · Formwheel_Casino::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "동점을 push 환불로 처리하고 bj.active와 Deal 비활성화로 진행 중 재입력 차단."
+  },
+  "🔎 코드 분석 · Formwheel_Clicker::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Clicker",
+    "path": "index.html",
+    "sha": "7166116650e9566b22182facc9e0d07ab31b17b8",
+    "note": "미검증 점수 랭킹임을 명시; Auto는 실제 경과 밀리초와 8시간 상한 및 나머지 누적으로 계산."
+  },
+  "🔎 코드 분석 · Formwheel_Clicker::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Clicker",
+    "path": "index.html",
+    "sha": "7166116650e9566b22182facc9e0d07ab31b17b8",
+    "note": "미검증 점수 랭킹임을 명시; Auto는 실제 경과 밀리초와 8시간 상한 및 나머지 누적으로 계산."
+  },
+  "🔎 코드 분석 · Formwheel_Reflex::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "phase 상태 검사·재시도 라운드 유지·저장 예외 처리·Space/Enter 입력 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Reflex::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "phase 상태 검사·재시도 라운드 유지·저장 예외 처리·Space/Enter 입력 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Reflex::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Reflex",
+    "path": "index.html",
+    "sha": "848c743416f764550ff2ea7696c1dd3f4c838b36",
+    "note": "phase 상태 검사·재시도 라운드 유지·저장 예외 처리·Space/Enter 입력 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Marble::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Marble",
+    "path": "index.html",
+    "sha": "d8f3c17f900d17d038236e13567dd66b3b4cd595",
+    "note": "공유 문자열 100KB·장애물 500개·좌표/크기/속도 검증 및 누적 시뮬레이션 시간 사용 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Marble::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Marble",
+    "path": "index.html",
+    "sha": "d8f3c17f900d17d038236e13567dd66b3b4cd595",
+    "note": "공유 문자열 100KB·장애물 500개·좌표/크기/속도 검증 및 누적 시뮬레이션 시간 사용 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Decode::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Decode",
+    "path": "index.html",
+    "sha": "02411cb2452d66868c2ad2ce3c1557b45a0d3e22",
+    "note": "후보·선택 이유·추정 우선순위를 표시하고 여러 해석이 가능하면 자동 선택하지 않으며 원문 유지."
+  },
+  "🔎 코드 분석 · Formwheel_AI::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "규칙 기반 한계 안내, 기억 수정·JSON 내보내기 구현. 서버 접근 권한 검증은 별도 미완료."
+  },
+  "🔎 코드 분석 · Formwheel_Piano::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "presence 이탈 시 대기방 정리/게임 종료, 방어 응답 20초 뒤 자동 진행 구현."
+  },
+  "🔎 코드 분석 · Formwheel_Time::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "serverTimeOffset 기반 serverNow와 startedAt 사용; 각 참가자 checkBattleEnd가 호스트 재선정/결과 확정."
+  },
+  "🔎 코드 분석 · Formwheel_Time::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Time",
+    "path": "index.html",
+    "sha": "826f361e414bbc96dcb8c99cb6138921ee6b5c9c",
+    "note": "serverTimeOffset 기반 serverNow와 startedAt 사용; 각 참가자 checkBattleEnd가 호스트 재선정/결과 확정."
+  },
+  "🔎 코드 분석 · Formwheel_Vault::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Vault",
+    "path": "index.html",
+    "sha": "195a4c2f88f58cec61eea6d90ea25ec4e9cce034",
+    "note": "금고 openedBy·점수·보상 영수증과 모든 금고 완료 후 새 금고/라운드 증가를 한 트랜잭션에서 기록."
+  },
+  "🔎 코드 분석 · Formwheel_Vault::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Vault",
+    "path": "index.html",
+    "sha": "195a4c2f88f58cec61eea6d90ea25ec4e9cce034",
+    "note": "금고 openedBy·점수·보상 영수증과 모든 금고 완료 후 새 금고/라운드 증가를 한 트랜잭션에서 기록."
+  },
+  "🔎 코드 분석 · Formwheel_Risk::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Risk",
+    "path": "index.html",
+    "sha": "7a8afd690d9255ee2da0691b3b19bce49f3f5fe2",
+    "note": "베팅·라운드 해결 트랜잭션, 30초 마감, presence 참가자 정리·호스트 교체 및 인원 부족 종료."
+  },
+  "🔎 코드 분석 · Formwheel_Risk::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Risk",
+    "path": "index.html",
+    "sha": "7a8afd690d9255ee2da0691b3b19bce49f3f5fe2",
+    "note": "베팅·라운드 해결 트랜잭션, 30초 마감, presence 참가자 정리·호스트 교체 및 인원 부족 종료."
+  },
+  "🔎 코드 분석 · Formwheel_Vote::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Vote",
+    "path": "index.html",
+    "sha": "03923e6aba4514aebc61411637d14817c98f98f2",
+    "note": "개인 UID의 기존 투표 검사와 선택지 집계를 동일 트랜잭션에서 수행."
+  },
+  "🔎 코드 분석 · Formwheel_Button::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Button",
+    "path": "index.html",
+    "sha": "d256027ced53cd2e2e5cf2198fc48633f0ea4745",
+    "note": "라운드별 답안 보존·총점 합산, 종료 시각 기반 타이머 및 Fisher–Yates 셔플 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Button::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Button",
+    "path": "index.html",
+    "sha": "d256027ced53cd2e2e5cf2198fc48633f0ea4745",
+    "note": "라운드별 답안 보존·총점 합산, 종료 시각 기반 타이머 및 Fisher–Yates 셔플 확인."
+  },
+  "🔎 코드 분석 · Formwheel_Edit::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Edit",
+    "path": "index.html",
+    "sha": "95aa639c48f8100bcf73ac4c55fd4a763654b175",
+    "note": "전체 타임라인 재생·영상/오디오 녹화, IndexedDB 원본 미디어 복구와 URL/스트림 해제; 10초 제한 제거."
+  },
+  "🔎 코드 분석 · Formwheel_Edit::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Edit",
+    "path": "index.html",
+    "sha": "95aa639c48f8100bcf73ac4c55fd4a763654b175",
+    "note": "전체 타임라인 재생·영상/오디오 녹화, IndexedDB 원본 미디어 복구와 URL/스트림 해제; 10초 제한 제거."
+  },
+  "🔎 코드 분석 · Formwheel_Edit::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Edit",
+    "path": "index.html",
+    "sha": "95aa639c48f8100bcf73ac4c55fd4a763654b175",
+    "note": "전체 타임라인 재생·영상/오디오 녹화, IndexedDB 원본 미디어 복구와 URL/스트림 해제; 10초 제한 제거."
+  },
+  "🔎 코드 분석 · Formwheel_Cook::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Cook",
+    "path": "index.html",
+    "sha": "9c0665fcf5cfd1b2d385ad5679ada564f724c729",
+    "note": "평가는 음식 상태에 결정적으로 의존하며 부족 재료·과조리·다음 행동 안내; 로컬 상태 복구와 되돌리기 구현."
+  },
+  "🔎 코드 분석 · Formwheel_Cook::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Cook",
+    "path": "index.html",
+    "sha": "9c0665fcf5cfd1b2d385ad5679ada564f724c729",
+    "note": "평가는 음식 상태에 결정적으로 의존하며 부족 재료·과조리·다음 행동 안내; 로컬 상태 복구와 되돌리기 구현."
+  },
+  "🔎 코드 분석 · Formwheel_Fate::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Fate",
+    "path": "index.html",
+    "sha": "5775a840cf1dd32b1fde895dd637b73d95cfef99",
+    "note": "스핀·양쪽 점수·영수증을 라운드 트랜잭션으로 처리; globalStats에서 영수증 ID 중복 검사와 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Fate::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Fate",
+    "path": "index.html",
+    "sha": "5775a840cf1dd32b1fde895dd637b73d95cfef99",
+    "note": "스핀·양쪽 점수·영수증을 라운드 트랜잭션으로 처리; globalStats에서 영수증 ID 중복 검사와 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Balance::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Balance",
+    "path": "index.html",
+    "sha": "cc80d05639e037db3ec924766c6132f2234c0eba",
+    "note": "라운드·호스트·준비 상태 검사와 점수/다음 라운드를 한 트랜잭션에 반영; 퇴장·호스트 이전·종료 처리."
+  },
+  "🔎 코드 분석 · Formwheel_Balance::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Balance",
+    "path": "index.html",
+    "sha": "cc80d05639e037db3ec924766c6132f2234c0eba",
+    "note": "라운드·호스트·준비 상태 검사와 점수/다음 라운드를 한 트랜잭션에 반영; 퇴장·호스트 이전·종료 처리."
+  },
+  "🔎 코드 분석 · Formwheel_WheelB::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_WheelB",
+    "path": "index.html",
+    "sha": "03947015ae00ca70648a70984715dccaf2481f4f",
+    "note": "STEAL 양쪽 점수와 done을 동일 트랜잭션에서 변경; 나가기·onDisconnect·호스트 이전/종료 처리."
+  },
+  "🔎 코드 분석 · Formwheel_WheelB::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_WheelB",
+    "path": "index.html",
+    "sha": "03947015ae00ca70648a70984715dccaf2481f4f",
+    "note": "STEAL 양쪽 점수와 done을 동일 트랜잭션에서 변경; 나가기·onDisconnect·호스트 이전/종료 처리."
+  },
+  "🔎 코드 분석 · Formwheel_Check::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Check",
+    "path": "index.html",
+    "sha": "546e702e28cd77ad7554a255723685a299d72722",
+    "note": "항목별 저장·공유 범위 안내·카테고리 인덱스 보존·로고 링크·재검토 날짜/근거 표시 및 재연결 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Check::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Check",
+    "path": "index.html",
+    "sha": "546e702e28cd77ad7554a255723685a299d72722",
+    "note": "항목별 저장·공유 범위 안내·카테고리 인덱스 보존·로고 링크·재검토 날짜/근거 표시 및 재연결 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Check::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Check",
+    "path": "index.html",
+    "sha": "546e702e28cd77ad7554a255723685a299d72722",
+    "note": "항목별 저장·공유 범위 안내·카테고리 인덱스 보존·로고 링크·재검토 날짜/근거 표시 및 재연결 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Check::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Check",
+    "path": "index.html",
+    "sha": "546e702e28cd77ad7554a255723685a299d72722",
+    "note": "항목별 저장·공유 범위 안내·카테고리 인덱스 보존·로고 링크·재검토 날짜/근거 표시 및 재연결 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Check::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Check",
+    "path": "index.html",
+    "sha": "546e702e28cd77ad7554a255723685a299d72722",
+    "note": "항목별 저장·공유 범위 안내·카테고리 인덱스 보존·로고 링크·재검토 날짜/근거 표시 및 재연결 재전송."
+  },
+  "🔎 코드 분석 · Formwheel_Tool::0": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "타이머 종료 시각 사용; QRCode 로컬 인코더와 외부로 전송되지 않는다는 안내 구현."
+  },
+  "🔎 코드 분석 · Formwheel_Tool::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Tool",
+    "path": "index.html",
+    "sha": "a9e35a4ccd00566cbee7808722b4480c4726cf7c",
+    "note": "타이머 종료 시각 사용; QRCode 로컬 인코더와 외부로 전송되지 않는다는 안내 구현."
+  },
+  "🔎 코드 분석 · Formwheel_Form::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Form",
+    "path": "index.html",
+    "sha": "5cf47f6481f70183dc92dc036bb9c3ce51e35698",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_Quiz::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Quiz",
+    "path": "index.html",
+    "sha": "b53174b12dbd9de85061bac43d9e40818b146109",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_Battle::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Battle",
+    "path": "index.html",
+    "sha": "06640a75273152e91c1e4c20415ef145ad6511d5",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_Spy::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Spy",
+    "path": "index.html",
+    "sha": "508209ec359f0471b9fbebdac4cd1fd8c8b78359",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_GCrown::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_GCrown",
+    "path": "index.html",
+    "sha": "bd550e2f9777cb9ca5a0a37f559e61a22e4d6998",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_Chat::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Chat",
+    "path": "index.html",
+    "sha": "48273788076476112b81057681823b9ed5df8fbf",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_AI::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_AI",
+    "path": "index.html",
+    "sha": "68c0b1c550dc26a2220d95d4e254d17db13e8972",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_Piano::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Piano",
+    "path": "index.html",
+    "sha": "709c2f9b878f4caa27fa7e0e3750a0e9b9d3b7ab",
+    "note": "운영 Firebase Rules/서버 검증과 권한 거부 테스트를 확인하지 못해 보안 완료로 체크하지 않음."
+  },
+  "🔎 코드 분석 · Formwheel_Vote::1": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Vote",
+    "path": "index.html",
+    "sha": "03923e6aba4514aebc61411637d14817c98f98f2",
+    "note": "익명 Auth UID와 클라이언트 host 검사는 도입됨. 직접 DB 쓰기를 거부하는 서버 Rules 검증이 남아 있음."
+  },
+  "🔎 코드 분석 · Formwheel_Music::1": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Music",
+    "path": "index.html",
+    "sha": "b9dcf5898f10f3dcfc90d209563f1efd833edd4b",
+    "note": "재생·판정은 audioContext.currentTime을 사용함. 저프레임/배경 복귀 시 오차 측정 검증은 남아 있음."
+  },
+  "🔎 코드 분석 · Formwheel_Marble::0": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Marble",
+    "path": "index.html",
+    "sha": "d8f3c17f900d17d038236e13567dd66b3b4cd595",
+    "note": "고정 1/60초 계산과 시드 도입은 완료. 30/60/120fps 판정 비교 검증은 추가 확인이 필요함."
+  },
+  "🔎 코드 분석 · Formwheel_Decode::0": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Decode",
+    "path": "index.html",
+    "sha": "02411cb2452d66868c2ad2ce3c1557b45a0d3e22",
+    "note": "현재 저장소에는 변환별 자동 왕복/오류 테스트가 없음."
+  },
+  "🔎 코드 분석 · Formwheel_GCrown::1": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_GCrown",
+    "path": "index.html",
+    "sha": "bd550e2f9777cb9ca5a0a37f559e61a22e4d6998",
+    "note": "보드·난이도와 온라인 이동 코드가 있으나 항목이 요구하는 모든 경계 사례 재현 테스트는 확인하지 못함."
+  },
+  "🔎 코드 분석 · Formwheel_Wheel::1": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Wheel",
+    "path": "index.html",
+    "sha": "26987f8cddbad571d0874687d51898436310ace4",
+    "note": "추첨 계산과 화면은 아직 단일 HTML에 포함되어 있음."
+  },
+  "🔎 코드 분석 · Formwheel_Bomb::1": {
+    "status": "partial",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Bomb",
+    "path": "index.html",
+    "sha": "4fd4b4b01f298fc00c06b08485abd577408b67ef",
+    "note": "전달/폭발 트랜잭션과 만료 조건은 있으나 실제 경계 시점 동시 접속 회귀 검증은 남아 있음."
+  },
+  "🔎 코드 분석 · Formwheel_Casino::0": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "현재 코드에 RTDB password 비교·아이디 세션 복원·클라이언트 잔액 정산이 남아 있음."
+  },
+  "🔎 코드 분석 · Formwheel_Casino::1": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "현재 코드에 RTDB password 비교·아이디 세션 복원·클라이언트 잔액 정산이 남아 있음."
+  },
+  "🔎 코드 분석 · Formwheel_Casino::2": {
+    "status": "pending",
+    "date": "2026-10-08",
+    "repo": "Formwheel_Casino",
+    "path": "index.html",
+    "sha": "b930cdc8a950c76058e0542e557dc202cbe7a575",
+    "note": "현재 코드에 RTDB password 비교·아이디 세션 복원·클라이언트 잔액 정산이 남아 있음."
+  },
+  "🎮 게임 공통 시스템::1": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "shared/formwheel-ui.css",
+    "sha": "973a08bcca5045f6ecd141fc0c30f811d701eb2b",
+    "note": "29개 프로젝트가 공통 UI 파일을 불러오며 카드 스타일, Modal·Toast·Loading·Error 컴포넌트를 제공함. 프로젝트별 시작/결과 화면 통합은 별도 작업."
+  },
+  "🎮 게임 공통 시스템::2": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "shared/formwheel-ui.js",
+    "sha": "4fcee1562bfce33c8fbc36e929dfdf573e014535",
+    "note": "29개 프로젝트가 공통 UI 파일을 불러오며 카드 스타일, Modal·Toast·Loading·Error 컴포넌트를 제공함. 프로젝트별 시작/결과 화면 통합은 별도 작업."
+  },
+  "🎮 게임 공통 시스템::3": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "shared/formwheel-ui.js",
+    "sha": "4fcee1562bfce33c8fbc36e929dfdf573e014535",
+    "note": "29개 프로젝트가 공통 UI 파일을 불러오며 카드 스타일, Modal·Toast·Loading·Error 컴포넌트를 제공함. 프로젝트별 시작/결과 화면 통합은 별도 작업."
+  },
+  "🎮 게임 공통 시스템::4": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "shared/formwheel-ui.js",
+    "sha": "4fcee1562bfce33c8fbc36e929dfdf573e014535",
+    "note": "29개 프로젝트가 공통 UI 파일을 불러오며 카드 스타일, Modal·Toast·Loading·Error 컴포넌트를 제공함. 프로젝트별 시작/결과 화면 통합은 별도 작업."
+  },
+  "🎮 게임 공통 시스템::5": {
+    "status": "complete",
+    "date": "2026-10-08",
+    "repo": "Formwheel",
+    "path": "shared/formwheel-ui.js",
+    "sha": "4fcee1562bfce33c8fbc36e929dfdf573e014535",
+    "note": "29개 프로젝트가 공통 UI 파일을 불러오며 카드 스타일, Modal·Toast·Loading·Error 컴포넌트를 제공함. 프로젝트별 시작/결과 화면 통합은 별도 작업."
+  }
+};
 const completedReviewItems = {
+  "🎵 FormWheel Music::0": true,
+  "🎵 FormWheel Music::1": true,
+  "🎵 FormWheel Music::2": true,
+  "🎵 FormWheel Music::3": true,
+  "🎵 FormWheel Music::4": true,
+  "🎵 FormWheel Music::5": true,
+  "🎵 FormWheel Music::6": true,
+  "🎵 FormWheel Music::7": true,
+  "🎵 FormWheel Music::8": true,
+  "🎵 FormWheel Music::13": true,
+  "🎵 FormWheel Music::14": true,
+  "🎵 FormWheel Music::15": true,
+  "🎵 FormWheel Music::16": true,
+  "🎵 FormWheel Music::17": true,
+  "🎵 FormWheel Music::19": true,
+  "🎵 FormWheel Music::20": true,
+  "🎵 FormWheel Music::21": true,
+  "🎵 FormWheel Music::22": true,
+  "🎵 FormWheel Music::23": true,
+  "🎵 FormWheel Music::24": true,
+  "🎵 FormWheel Music::25": true,
+  "🎵 FormWheel Music::26": true,
+  "🎵 FormWheel Music::27": true,
+  "🎵 FormWheel Music::28": true,
+  "💬 FormWheel Chat::0": true,
+  "💬 FormWheel Chat::1": true,
+  "💬 FormWheel Chat::2": true,
+  "💬 FormWheel Chat::3": true,
+  "💬 FormWheel Chat::4": true,
+  "💬 FormWheel Chat::5": true,
+  "💬 FormWheel Chat::6": true,
+  "💬 FormWheel Chat::7": true,
+  "💬 FormWheel Chat::8": true,
+  "💬 FormWheel Chat::9": true,
+  "💬 FormWheel Chat::10": true,
+  "💬 FormWheel Chat::11": true,
+  "💬 FormWheel Chat::12": true,
+  "💬 FormWheel Chat::13": true,
+  "💬 FormWheel Chat::14": true,
+  "💬 FormWheel Chat::15": true,
+  "💬 FormWheel Chat::16": true,
+  "🎰 FormWheel Casino::0": true,
+  "🎰 FormWheel Casino::2": true,
+  "🎰 FormWheel Casino::3": true,
+  "🎰 FormWheel Casino::5": true,
+  "⚡ FormWheel Reflex::0": true,
+  "⚡ FormWheel Reflex::2": true,
+  "⚡ FormWheel Reflex::3": true,
+  "⚡ FormWheel Reflex::4": true,
+  "⚡ FormWheel Reflex::5": true,
+  "⚡ FormWheel Reflex::6": true,
+  "⚡ FormWheel Reflex::7": true,
+  "⚡ FormWheel Reflex::8": true,
+  "⚡ FormWheel Reflex::9": true,
+  "🤖 FormWheel AI::0": true,
+  "🤖 FormWheel AI::1": true,
+  "🤖 FormWheel AI::2": true,
+  "🤖 FormWheel AI::3": true,
+  "🤖 FormWheel AI::4": true,
+  "🤖 FormWheel AI::5": true,
+  "🤖 FormWheel AI::6": true,
+  "🤖 FormWheel AI::7": true,
+  "🤖 FormWheel AI::8": true,
+  "🤖 FormWheel AI::9": true,
+  "🤖 FormWheel AI::10": true,
+  "🤖 FormWheel AI::11": true,
+  "🤖 FormWheel AI::12": true,
+  "🔄 자리바꾸기::0": true,
+  "🔄 자리바꾸기::1": true,
+  "🔄 자리바꾸기::2": true,
+  "🔄 자리바꾸기::3": true,
+  "🔄 자리바꾸기::8": true,
+  "🎹 FormWheel Piano::0": true,
+  "🎹 FormWheel Piano::1": true,
+  "🎹 FormWheel Piano::2": true,
+  "🎹 FormWheel Piano::3": true,
+  "🎹 FormWheel Piano::4": true,
+  "🎹 FormWheel Piano::5": true,
+  "🎹 FormWheel Piano::6": true,
+  "🎹 FormWheel Piano::8": true,
+  "🎹 FormWheel Piano::9": true,
+  "⏱️ FormWheel Time::0": true,
+  "⏱️ FormWheel Time::2": true,
+  "⏱️ FormWheel Time::3": true,
+  "⏱️ FormWheel Time::6": true,
+  "⏱️ FormWheel Time::8": true,
+  "⏱️ FormWheel Time::9": true,
+  "🔎 코드 분석 · Formwheel::0": true,
+  "🔎 코드 분석 · Formwheel::1": true,
   "🔎 코드 분석 · Formwheel::2": true,
+  "🔎 코드 분석 · Formwheel::3": true,
+  "🔎 코드 분석 · Formwheel_Form::1": true,
+  "🔎 코드 분석 · Formwheel_Wheel::0": true,
+  "🔎 코드 분석 · Formwheel_Quiz::1": true,
+  "🔎 코드 분석 · Formwheel_Battle::1": true,
+  "🔎 코드 분석 · Formwheel_Bomb::0": true,
+  "🔎 코드 분석 · Formwheel_DiceDuel::0": true,
+  "🔎 코드 분석 · Formwheel_DiceDuel::1": true,
+  "🔎 코드 분석 · Formwheel_Spy::1": true,
+  "🔎 코드 분석 · Formwheel_Music::0": true,
+  "🔎 코드 분석 · Formwheel_Chat::1": true,
+  "🔎 코드 분석 · Formwheel_Casino::3": true,
+  "🔎 코드 분석 · Formwheel_Clicker::0": true,
+  "🔎 코드 분석 · Formwheel_Clicker::1": true,
   "🔎 코드 분석 · Formwheel_Reflex::0": true,
   "🔎 코드 분석 · Formwheel_Reflex::1": true,
   "🔎 코드 분석 · Formwheel_Reflex::2": true,
+  "🔎 코드 분석 · Formwheel_Marble::1": true,
+  "🔎 코드 분석 · Formwheel_Marble::2": true,
+  "🔎 코드 분석 · Formwheel_Decode::1": true,
+  "🔎 코드 분석 · Formwheel_AI::1": true,
+  "🔎 코드 분석 · Formwheel_Piano::1": true,
+  "🔎 코드 분석 · Formwheel_Time::0": true,
+  "🔎 코드 분석 · Formwheel_Time::1": true,
+  "🔎 코드 분석 · Formwheel_Vault::0": true,
+  "🔎 코드 분석 · Formwheel_Vault::1": true,
+  "🔎 코드 분석 · Formwheel_Risk::0": true,
+  "🔎 코드 분석 · Formwheel_Risk::1": true,
+  "🔎 코드 분석 · Formwheel_Vote::0": true,
   "🔎 코드 분석 · Formwheel_Button::0": true,
   "🔎 코드 분석 · Formwheel_Button::1": true,
-  "🔎 코드 분석 · Formwheel_Tool::0": true,
-  "🔎 코드 분석 · Formwheel_Music::0": true,
-  "🔎 코드 분석 · Formwheel_Marble::2": true,
+  "🔎 코드 분석 · Formwheel_Edit::0": true,
+  "🔎 코드 분석 · Formwheel_Edit::1": true,
+  "🔎 코드 분석 · Formwheel_Edit::2": true,
+  "🔎 코드 분석 · Formwheel_Cook::0": true,
+  "🔎 코드 분석 · Formwheel_Cook::1": true,
+  "🔎 코드 분석 · Formwheel_Fate::0": true,
+  "🔎 코드 분석 · Formwheel_Fate::1": true,
+  "🔎 코드 분석 · Formwheel_Balance::0": true,
+  "🔎 코드 분석 · Formwheel_Balance::1": true,
+  "🔎 코드 분석 · Formwheel_WheelB::0": true,
+  "🔎 코드 분석 · Formwheel_WheelB::1": true,
   "🔎 코드 분석 · Formwheel_Check::0": true,
+  "🔎 코드 분석 · Formwheel_Check::1": true,
   "🔎 코드 분석 · Formwheel_Check::2": true,
-  "🔎 코드 분석 · Formwheel_Check::4": true
+  "🔎 코드 분석 · Formwheel_Check::3": true,
+  "🔎 코드 분석 · Formwheel_Check::4": true,
+  "🔎 코드 분석 · Formwheel_Tool::0": true,
+  "🔎 코드 분석 · Formwheel_Tool::1": true,
+  "🎮 게임 공통 시스템::1": true,
+  "🎮 게임 공통 시스템::2": true,
+  "🎮 게임 공통 시스템::3": true,
+  "🎮 게임 공통 시스템::4": true,
+  "🎮 게임 공통 시스템::5": true
 };
 const pendingKey = "formwheel_check_pending_v1";
 let pendingChanges = {};
 try { pendingChanges = JSON.parse(localStorage.getItem(pendingKey) || "{}") || {}; } catch {}
-let state = {...completedReviewItems, ...pendingChanges};
+const stateKey="formwheel_check_state_v2";
+let reviewSynced=false,firebaseConnected=false;
+function reconcileState(remote){
+ const saved=remote && typeof remote==="object"?remote:{};
+ // Apply this audit once; later deliberate unchecks remain authoritative.
+ return {...saved,...(!saved[reviewVersion]?completedReviewItems:{}),...pendingChanges};
+}
+let cachedState={};
+try{cachedState=JSON.parse(localStorage.getItem(stateKey)||"{}")||{};}catch{}
+let state=reconcileState(cachedState);
+function cacheState(){try{localStorage.setItem(stateKey,JSON.stringify(state));}catch{}}
 function cachePending(){try{localStorage.setItem(pendingKey, JSON.stringify(pendingChanges));}catch{}}
 
 
@@ -1160,31 +2708,38 @@ function showFirebaseStatus(message){
 
 
 let saving = false;
+let saveRetryTimer=null,saveRetryDelay=1000;
 function save(changes = {}){
  Object.assign(pendingChanges, changes);
- cachePending();updateProgress();
+ cachePending();cacheState();updateProgress();
  if(!firebaseReady) showFirebaseStatus("기기에 보관 중 · 연결 후 저장");
  flushPending();
 }
 async function flushPending(){
  if(saving || !firebaseReady || !window.firebaseChecklist || !Object.keys(pendingChanges).length)return;
  saving=true;
+ clearTimeout(saveRetryTimer);
  const patch={...pendingChanges};
  let succeeded=false;
  try{
   await window.firebaseChecklist.update(window.firebaseChecklist.checklistRef, patch);
   for(const [id,value] of Object.entries(patch))if(pendingChanges[id]===value)delete pendingChanges[id];
-  cachePending();succeeded=true;
+  cachePending();cacheState();succeeded=true;saveRetryDelay=1000;
   showFirebaseStatus("☑️ 저장됨 · Firebase · 공유 목록");
  }catch(error){
   console.error("Firebase 저장 실패:",error);
-  showFirebaseStatus("❌ 저장 실패 · 기기에 보관 중 · 다음 변경 또는 재연결 시 재시도");
+  showFirebaseStatus("❌ 저장 실패 · 기기에 보관 중 · 자동 재시도 예정");
  }finally{
   saving=false;
   if(succeeded && Object.keys(pendingChanges).length)flushPending();
+  else if(!succeeded && firebaseReady){
+   saveRetryTimer=setTimeout(flushPending,saveRetryDelay);
+   saveRetryDelay=Math.min(30000,saveRetryDelay*2);
+  }
  }
 }
 window.addEventListener("online",flushPending);
+window.addEventListener("offline",()=>showFirebaseStatus("기기에 보관 중 · 인터넷 재연결 대기"));
 
 function render(){
 
@@ -1210,6 +2765,7 @@ function render(){
 
     section.className =
       "category";
+    section.dataset.category=category;
 
 
     const categoryIndex = index;
@@ -1297,6 +2853,7 @@ function render(){
 
         checkbox.type =
           "checkbox";
+        label.dataset.itemId=id;
 
 
         checkbox.checked =
@@ -1340,6 +2897,7 @@ function render(){
             );
 
             save({[id]: checkbox.checked});
+            applyReviewFilter();
 
             updateCategory(
               category,
@@ -1351,10 +2909,19 @@ function render(){
         );
 
 
-        label.append(
-          checkbox,
-          span
-        );
+        const copy=document.createElement("span");copy.className="item-copy";copy.append(span);
+        const evidence=reviewEvidence[id];
+        if(evidence){
+          const note=document.createElement("small");note.className="review-note "+evidence.status;
+          const status={complete:"구현 확인",partial:"일부 구현 · 추가 검증 필요",pending:"미완료"};
+          note.append(document.createTextNode(evidence.date+" · "+status[evidence.status]+" · "+evidence.note+" "));
+          const link=document.createElement("a");
+          link.href="https://github.com/SemicolonXSS/"+evidence.repo+"/blob/main/"+evidence.path;
+          link.textContent="검토 코드";link.target="_blank";link.rel="noopener noreferrer";
+          link.title="검토한 파일 SHA: "+(evidence.sha||"현재 변경");
+          note.append(link);copy.append(note);
+        }
+        label.append(checkbox,copy);
 
 
         list.appendChild(
@@ -1389,9 +2956,22 @@ function render(){
 
 
   updateProgress();
+  applyReviewFilter();
 
 }
 
+function applyReviewFilter(){
+ const mode=document.getElementById("reviewFilter").value;
+ for(const section of document.querySelectorAll(".category")){
+  let visible=0;
+  for(const label of section.querySelectorAll("label.item")){
+   const id=label.dataset.itemId;
+   label.hidden=mode==="incomplete"?!!state[id]:mode==="reviewed"?!reviewEvidence[id]:false;
+   if(!label.hidden)visible++;
+  }
+  section.hidden=!visible;
+ }
+}
 
 function updateCategory(
   category,

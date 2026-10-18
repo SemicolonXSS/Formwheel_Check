@@ -116,7 +116,7 @@
       <button type="button" id="inviteClose">닫기</button>
     </section>
     <form id="inviteJoin" class="personal-join">
-      <input id="joinCode" aria-label="다른 사람의 체크리스트 코드" placeholder="다른 체크리스트 코드 입력" maxlength="40" required>
+      <input id="joinCode" aria-label="다른 사람의 체크리스트 코드" placeholder="4~8자리 숫자 코드 (예: 1340)" maxlength="32" inputmode="numeric" required>
       <button type="submit">코드로 참여</button>
     </form>
   </section>
@@ -147,7 +147,7 @@
 
 
 <script type="module" src="https://semicolonxss.github.io/Formwheel/assets/live-presence.js?v=20261017-duration"></script>
-<script defer src="./assets/personal-check.js?v=3"></script>
+<script defer src="./assets/personal-check.js?v=4"></script>
 <script>
 (function(){
   let loaded=false;

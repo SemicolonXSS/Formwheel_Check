@@ -4,7 +4,16 @@ const $=id=>document.getElementById(id);
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n};
 const button=(text,fn)=>{const n=el("button","",text);n.type="button";n.addEventListener("click",fn);return n};
 const id=()=>crypto.randomUUID?crypto.randomUUID():Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,"0")).join("");
-const code=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,"0")).join("").toUpperCase();
+const code=()=>{
+ // Eight digits by default: shorter, while harder to guess than four digits.
+ const used=new Set(["1340",...lists.map(x=>x.inviteCode).filter(Boolean)]);
+ for(let attempt=0;attempt<100;attempt++){
+  const bytes=new Uint32Array(1);crypto.getRandomValues(bytes);
+  const candidate=String(10000000+(bytes[0]%90000000));
+  if(!used.has(candidate))return candidate;
+ }
+ throw new Error("코드를 생성할 수 없습니다.");
+};
 const safeRead=(key,def)=>{try{return JSON.parse(localStorage.getItem(key)||"null")??def}catch{return def}};
 let lists=safeRead(KEY,[]).filter?.(x=>x&&typeof x.id==="string"&&typeof x.title==="string"&&Array.isArray(x.items))||[];
 let selected=localStorage.getItem(SELECT)||"";
@@ -54,6 +63,6 @@ function render(){
 $("personalCreate").addEventListener("submit",ev=>{ev.preventDefault();const field=$("personalTitle");if(!field.value.trim()||lists.length>=100)return;const item={id:id(),title:field.value.trim().slice(0,80),inviteCode:code(),items:[]};lists.unshift(item);field.value="";pick(item.id);$("inviteCodeValue").textContent=item.inviteCode;$("inviteDialog").hidden=false});
 $("inviteClose").addEventListener("click",()=>{$("inviteDialog").hidden=true});
 $("inviteCopy").addEventListener("click",async()=>{const value=$("inviteCodeValue").textContent;try{await navigator.clipboard.writeText(value);notice.textContent="코드를 복사했어요. 현재 다른 기기에서는 참여할 수 없어요."}catch{prompt("복사할 코드",value)}});
-$("inviteJoin").addEventListener("submit",ev=>{ev.preventDefault();const value=$("joinCode").value.replace(/\s|-/g,"").toUpperCase();if(!/^[A-F0-9]{32}$/.test(value)){alert("올바른 32자리 코드를 입력해 주세요.");return}const found=lists.find(x=>x.inviteCode===value);if(found){pick(found.id);$("joinCode").value="";return}alert("아직 클라우드 공동 편집이 연결되지 않았어요. 다른 사람의 코드는 서버 보안 규칙 적용 후 사용할 수 있습니다.")});
+$("inviteJoin").addEventListener("submit",ev=>{ev.preventDefault();const value=$("joinCode").value.replace(/\s|-/g,"").toUpperCase();if(!(/^[0-9]{4,8}$/.test(value)||/^[A-F0-9]{32}$/.test(value))){alert("4~8자리 숫자 코드를 입력해 주세요. 기존 32자리 코드도 사용할 수 있어요.");return}const found=lists.find(x=>x.inviteCode===value);if(found){pick(found.id);$("joinCode").value="";return}alert("아직 클라우드 공동 편집이 연결되지 않았어요. 다른 사람의 코드는 서버 보안 규칙 적용 후 사용할 수 있습니다.")});
 render();
 })();

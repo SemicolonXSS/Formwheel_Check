@@ -8,17 +8,30 @@ const code=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toStri
 const safeRead=(key,def)=>{try{return JSON.parse(localStorage.getItem(key)||"null")??def}catch{return def}};
 let lists=safeRead(KEY,[]).filter?.(x=>x&&typeof x.id==="string"&&typeof x.title==="string"&&Array.isArray(x.items))||[];
 let selected=localStorage.getItem(SELECT)||"";
+let improvementJoined=localStorage.getItem("formwheel-check-improvement-joined")==="yes";
+const improvementId="__formwheel_improvement__";
+window.addEventListener("formwheel-improvement-left",()=>{improvementJoined=false;if(selected===improvementId)selected=lists[0]?.id||"";save();render()});
 const notice=$("personalNotice"),listRoot=$("personalLists"),sidebar=$("personalSidebar");
 function save(){try{localStorage.setItem(KEY,JSON.stringify(lists));localStorage.setItem(SELECT,selected);notice.textContent="내 브라우저에 저장됨 · 공동 편집은 아직 활성화되지 않았어요."}catch{notice.textContent="저장 실패: 저장 공간을 확인하세요."}}
 function pick(lid){selected=lid;save();render()}
 function current(){return lists.find(x=>x.id===selected)}
 function render(){
  sidebar.replaceChildren();listRoot.replaceChildren();
+ if(improvementJoined){
+   const special=button("🛠️ Formwheel 개선 프로젝트",()=>pick(improvementId));
+   special.className="personal-nav-item"+(selected===improvementId?" active":"");
+   sidebar.append(special);
+ }
+ if(selected===improvementId&&improvementJoined){
+   if(typeof window.openImprovementChecklist==="function")window.openImprovementChecklist();
+   listRoot.append(el("p","personal-progress","공유 개선 프로젝트가 아래에 열렸어요. 진행 상태를 확인하고 수정할 수 있어요."));
+ }else if(typeof window.closeImprovementChecklist==="function")window.closeImprovementChecklist();
  for(const list of lists){
   const b=button((list.icon||"☑️")+" "+list.title,()=>pick(list.id));
   b.className="personal-nav-item"+(selected===list.id?" active":"");b.title=list.title;sidebar.append(b);
  }
- if(!lists.length){listRoot.append(el("p","personal-empty","첫 체크리스트를 만들어 보세요!"));return}
+ if(!lists.length){if(!improvementJoined)listRoot.append(el("p","personal-empty","첫 체크리스트를 만들어 보세요!"));return}
+ if(selected===improvementId&&improvementJoined)return;
  const list=current();if(!list){selected=lists[0].id;save();render();return}
  const wrap=el("article","personal-list");
  const header=el("div","personal-list-head");header.append(el("h3","",list.title));

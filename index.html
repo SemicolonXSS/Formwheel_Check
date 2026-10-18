@@ -48,16 +48,6 @@
   </section>
 
 
-  <section id="improvementGate" class="progress-card" aria-labelledby="improvementGateHeading">
-    <h2 id="improvementGateHeading">🔒 Formwheel 개선 프로젝트</h2>
-    <p class="progress-label">개선 프로젝트 체크리스트를 열려면 접근 코드를 입력하세요. 개인 체크리스트는 코드 없이 사용할 수 있습니다.</p>
-    <form id="improvementUnlock" class="personal-create">
-      <input id="improvementCode" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="4자리 코드" aria-label="개선 체크리스트 접근 코드" required>
-      <button type="submit" class="primary">열기</button>
-    </form>
-    <p id="improvementError" class="progress-label" role="alert"></p>
-    <p class="progress-label">참고: 이 코드는 화면 접근용이며, Firebase 데이터에 대한 보안 인증을 대신하지 않습니다.</p>
-  </section>
   <div id="improvementContents" hidden>
   <section class="progress-card">
 
@@ -132,7 +122,7 @@
   </section>
 
   <section id="improvementChecklistSection" hidden>
-  <h2>🌐 공유 개선 체크리스트 <button id="improvementLock" type="button">잠그기</button></h2>
+  <h2>🌐 공유 개선 체크리스트 <button id="improvementLock" type="button">목록에서 나가기</button></h2>
   <label class="review-filter">표시
     <select id="reviewFilter" onchange="applyReviewFilter()">
       <option value="all">전체 항목</option><option value="incomplete">미완료 항목</option><option value="reviewed">검토 근거가 있는 항목</option>
@@ -157,16 +147,13 @@
 
 
 <script type="module" src="https://semicolonxss.github.io/Formwheel/assets/live-presence.js?v=20261017-duration"></script>
-<script defer src="./assets/personal-check.js?v=2"></script>
+<script defer src="./assets/personal-check.js?v=3"></script>
 <script>
 (function(){
-  const gate=document.getElementById("improvementGate");
-  const contents=document.getElementById("improvementContents");
-  const section=document.getElementById("improvementChecklistSection");
-  const error=document.getElementById("improvementError");
   let loaded=false;
-  function unlock(){
-    gate.hidden=true;contents.hidden=false;section.hidden=false;
+  window.openImprovementChecklist=function(){
+    document.getElementById("improvementContents").hidden=false;
+    document.getElementById("improvementChecklistSection").hidden=false;
     if(loaded)return;
     loaded=true;
     const shared=document.createElement("script");
@@ -176,19 +163,23 @@
       module.type="module";module.src="./assets/app.js?v=719313ab5846";
       document.body.appendChild(module);
     };
-    shared.onerror=function(){error.textContent="체크리스트 파일을 불러오지 못했습니다.";gate.hidden=false;contents.hidden=true;section.hidden=true;loaded=false};
+    shared.onerror=function(){
+      loaded=false;
+      document.getElementById("improvementContents").hidden=true;
+      document.getElementById("improvementChecklistSection").hidden=true;
+      alert("공유 개선 체크리스트를 불러오지 못했어요.");
+    };
     document.body.appendChild(shared);
-  }
-  document.getElementById("improvementUnlock").addEventListener("submit",function(event){
-    event.preventDefault();
-    if(document.getElementById("improvementCode").value==="1340"){
-      sessionStorage.setItem("formwheel-check-improvement-unlocked","yes");error.textContent="";unlock();
-    }else{error.textContent="코드가 올바르지 않아요.";document.getElementById("improvementCode").value=""}
-  });
+  };
+  window.closeImprovementChecklist=function(){
+    document.getElementById("improvementContents").hidden=true;
+    document.getElementById("improvementChecklistSection").hidden=true;
+  };
   document.getElementById("improvementLock").addEventListener("click",function(){
-    sessionStorage.removeItem("formwheel-check-improvement-unlocked");location.reload();
+    localStorage.removeItem("formwheel-check-improvement-joined");
+    window.closeImprovementChecklist();
+    window.dispatchEvent(new Event("formwheel-improvement-left"));
   });
-  if(sessionStorage.getItem("formwheel-check-improvement-unlocked")==="yes")unlock();
 })();
 </script>
 </body>

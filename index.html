@@ -13,6 +13,7 @@
 <script defer src="https://semicolonxss.github.io/Formwheel/shared/formwheel-ui.js"></script>
 <link rel="stylesheet" href="assets/formwheel-brand.css?v=20261008-hub-logo">
 <link rel="icon" type="image/svg+xml" href="https://semicolonxss.github.io/Formwheel/assets/formwheel-favicon.svg">
+<link rel="stylesheet" href="./assets/personal-check.css?v=1">
 </head>
 
 <body>
@@ -97,6 +98,18 @@
   </section>
 
 
+  <section class="personal-panel" aria-labelledby="personalHeading">
+    <h2 id="personalHeading">📝 내 체크리스트</h2>
+    <p class="personal-hint">나만의 목록을 여러 개 만들고 할 일을 관리하세요. 기존 공유 개선 목록과는 별개입니다.</p>
+    <form id="personalCreate" class="personal-create">
+      <input id="personalTitle" aria-label="새 체크리스트 이름" placeholder="예: 오늘의 할 일, 프로젝트 개발" maxlength="80" required>
+      <button type="submit" class="primary">+ 체크리스트 만들기</button>
+    </form>
+    <p id="personalNotice" class="personal-hint">이 브라우저에만 저장됩니다. 브라우저 데이터를 삭제하면 목록도 사라질 수 있어요.</p>
+    <div id="personalLists"></div>
+  </section>
+
+  <h2>🌐 공유 개선 체크리스트</h2>
   <label class="review-filter">표시
     <select id="reviewFilter" onchange="applyReviewFilter()">
       <option value="all">전체 항목</option><option value="incomplete">미완료 항목</option><option value="reviewed">검토 근거가 있는 항목</option>
@@ -120,6 +133,7 @@
 <script src="./assets/app-2.js?v=verified-20261009"></script>
 
 <script type="module" src="https://semicolonxss.github.io/Formwheel/assets/live-presence.js?v=20261017-duration"></script>
+<script defer src="./assets/personal-check.js?v=1"></script>
 </body>
 </html>
 

@@ -13,7 +13,7 @@
 <script defer src="https://semicolonxss.github.io/Formwheel/shared/formwheel-ui.js"></script>
 <link rel="stylesheet" href="assets/formwheel-brand.css?v=20261008-hub-logo">
 <link rel="icon" type="image/svg+xml" href="https://semicolonxss.github.io/Formwheel/assets/formwheel-favicon.svg">
-<link rel="stylesheet" href="./assets/personal-check.css?v=1">
+<link rel="stylesheet" href="./assets/personal-check.css?v=2">
 </head>
 
 <body>
@@ -105,8 +105,18 @@
       <input id="personalTitle" aria-label="새 체크리스트 이름" placeholder="예: 오늘의 할 일, 프로젝트 개발" maxlength="80" required>
       <button type="submit" class="primary">+ 체크리스트 만들기</button>
     </form>
-    <p id="personalNotice" class="personal-hint">이 브라우저에만 저장됩니다. 브라우저 데이터를 삭제하면 목록도 사라질 수 있어요.</p>
-    <div id="personalLists"></div>
+    <p id="personalNotice" class="personal-hint">목록은 현재 이 브라우저에 저장됩니다. 다른 사람과 실시간 협업하려면 서버 보안 규칙 설정이 필요합니다.</p>
+    <div class="personal-workspace"><nav id="personalSidebar" class="personal-sidebar" aria-label="내 체크리스트 목록"></nav><div id="personalLists"></div></div>
+    <section id="inviteDialog" class="personal-invite" hidden aria-label="초대 코드">
+      <h3>🔑 체크리스트 코드</h3><code id="inviteCodeValue"></code>
+      <p>이 코드는 현재 이 브라우저에서 목록을 식별하기 위한 코드입니다. 서버의 안전한 공동 편집 연결 전에는 다른 기기에서 참여할 수 없습니다. 비밀번호처럼 공개하지 마세요.</p>
+      <button type="button" id="inviteCopy">코드 복사</button>
+      <button type="button" id="inviteClose">닫기</button>
+    </section>
+    <form id="inviteJoin" class="personal-join">
+      <input id="joinCode" aria-label="다른 사람의 체크리스트 코드" placeholder="다른 체크리스트 코드 입력" maxlength="40" required>
+      <button type="submit">코드로 참여</button>
+    </form>
   </section>
 
   <h2>🌐 공유 개선 체크리스트</h2>
@@ -133,7 +143,7 @@
 <script src="./assets/app-2.js?v=verified-20261009"></script>
 
 <script type="module" src="https://semicolonxss.github.io/Formwheel/assets/live-presence.js?v=20261017-duration"></script>
-<script defer src="./assets/personal-check.js?v=1"></script>
+<script defer src="./assets/personal-check.js?v=2"></script>
 </body>
 </html>
 

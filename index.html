@@ -116,7 +116,7 @@
       <button type="button" id="inviteClose">닫기</button>
     </section>
     <form id="inviteJoin" class="personal-join">
-      <input id="joinCode" aria-label="다른 사람의 체크리스트 코드" placeholder="4~8자리 숫자 코드 (예: 1234)" maxlength="32" inputmode="numeric" required>
+      <input id="joinCode" aria-label="다른 사람의 체크리스트 코드" placeholder="4~8자리 숫자 코드" minlength="4" maxlength="8" pattern="[0-9]{4,8}" title="숫자 4~8자리를 입력하세요" inputmode="numeric" required>
       <button type="submit">코드로 참여</button>
     </form>
   </section>

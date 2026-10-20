@@ -74,6 +74,7 @@
       <div
         class="progress-label"
         id="saveStatus"
+          role="status" aria-live="polite"
       >
         Firebase 연결 중...
       </div>
@@ -107,7 +108,7 @@
       <input id="personalTitle" aria-label="새 체크리스트 이름" placeholder="예: 오늘의 할 일, 프로젝트 개발" maxlength="80" required>
       <button type="submit" class="primary">+ 체크리스트 만들기</button>
     </form>
-    <p id="personalNotice" class="personal-hint">목록은 현재 이 브라우저에 저장됩니다. 다른 사람과 실시간 협업하려면 서버 보안 규칙 설정이 필요합니다.</p>
+    <p id="personalNotice" class="personal-hint" role="status" aria-live="polite">목록은 현재 이 브라우저에 저장됩니다. 다른 사람과 실시간 협업하려면 서버 보안 규칙 설정이 필요합니다.</p>
     <div class="personal-workspace"><nav id="personalSidebar" class="personal-sidebar" aria-label="내 체크리스트 목록"></nav><div id="personalLists"></div></div>
     <section id="inviteDialog" class="personal-invite" hidden aria-label="초대 코드">
       <h3>🔑 체크리스트 코드</h3><code id="inviteCodeValue"></code>

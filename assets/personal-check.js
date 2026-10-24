@@ -14,10 +14,11 @@ const code=()=>{
  }
  throw new Error("코드를 생성할 수 없습니다.");
 };
-const safeRead=(key,def)=>{try{return JSON.parse(localStorage.getItem(key)||"null")??def}catch{return def}};
+const readText=key=>{try{return localStorage.getItem(key)}catch{return null}};
+const safeRead=(key,def)=>{try{return JSON.parse(readText(key)||"null")??def}catch{return def}};
 let lists=safeRead(KEY,[]).filter?.(x=>x&&typeof x.id==="string"&&typeof x.title==="string"&&Array.isArray(x.items))||[];
-let selected=localStorage.getItem(SELECT)||"";
-let improvementJoined=localStorage.getItem("formwheel-check-improvement-joined")==="yes";
+let selected=readText(SELECT)||"";
+let improvementJoined=readText("formwheel-check-improvement-joined")==="yes";
 const improvementId="__formwheel_improvement__";
 window.addEventListener("formwheel-improvement-left",()=>{improvementJoined=false;if(selected===improvementId)selected=lists[0]?.id||"";save();render()});
 const notice=$("personalNotice"),listRoot=$("personalLists"),sidebar=$("personalSidebar");
